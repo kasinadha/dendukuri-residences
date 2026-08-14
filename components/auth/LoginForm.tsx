@@ -1,44 +1,15 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-
-const AUTH_TIMEOUT_MS = 15000;
-
-async function withTimeout<T>(
-  promise: PromiseLike<T>,
-  ms: number,
-  label: string
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve(promise),
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `${label} timed out after ${ms / 1000}s. Check network / Supabase URL.`
-              )
-            ),
-          ms
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
+import { signInWithPasswordAction } from "@/app/login/actions";
 
 export default function LoginForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     const reason = searchParams.get("error");
@@ -48,99 +19,24 @@ export default function LoginForm() {
       );
     } else if (reason === "session") {
       setError(
-        "No active session after login. Cookies may be blocked, or Supabase env keys may be wrong."
+        "No active session was found. Try signing in again. If it keeps happening, confirm .env.local matches your Supabase project."
       );
     }
   }, [searchParams]);
 
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+  function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setLoading(true);
     setError("");
-    setStatus("Contacting Supabase Auth…");
 
-    const supabase = createClient();
+    const formData = new FormData(event.currentTarget);
 
-    try {
-      const { data: authData, error: signInError } = await withTimeout(
-        supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        }),
-        AUTH_TIMEOUT_MS,
-        "Sign-in"
-      );
-
-      if (signInError) {
-        setError(signInError.message);
-        return;
+    startTransition(async () => {
+      const result = await signInWithPasswordAction(formData);
+      // Successful login redirects on the server and never returns.
+      if (result && !result.ok) {
+        setError(result.error);
       }
-
-      const userId = authData.user?.id;
-      if (!userId) {
-        setError("Login failed. Please try again.");
-        return;
-      }
-
-      setStatus("Loading profile…");
-      const { data: profile, error: profileError } = await withTimeout(
-        supabase
-          .from("profiles")
-          .select("role,is_active")
-          .eq("id", userId)
-          .maybeSingle(),
-        AUTH_TIMEOUT_MS,
-        "Profile lookup"
-      );
-
-      if (profileError) {
-        await supabase.auth.signOut();
-        setError(
-          `Could not load profile (${profileError.message}). Check RLS policies on profiles.`
-        );
-        return;
-      }
-
-      if (!profile) {
-        await supabase.auth.signOut();
-        setError(
-          "Signed in to Auth, but no profiles row exists for this user. In Supabase SQL editor, insert a profiles row with role='admin' and is_active=true matching your auth.users id."
-        );
-        return;
-      }
-
-      if (!profile.is_active) {
-        await supabase.auth.signOut();
-        setError(
-          "Your profile exists but is_active is false. Set is_active=true in the profiles table."
-        );
-        return;
-      }
-
-      if (profile.role === "admin") {
-        setStatus("Redirecting to admin…");
-        window.location.assign("/admin");
-        return;
-      }
-
-      if (profile.role === "tenant") {
-        setStatus("Redirecting to tenant…");
-        window.location.assign("/tenant");
-        return;
-      }
-
-      await supabase.auth.signOut();
-      setError(
-        `Profile role is "${profile.role ?? "unknown"}" — expected "admin" or "tenant". Update profiles.role in Supabase.`
-      );
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Login failed. Please try again."
-      );
-    } finally {
-      setLoading(false);
-      setStatus("");
-    }
+    });
   }
 
   return (
@@ -165,11 +61,12 @@ export default function LoginForm() {
 
           <input
             type="email"
+            name="email"
             required
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            disabled={loading}
+            disabled={pending}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 disabled:opacity-60"
           />
         </div>
@@ -181,20 +78,15 @@ export default function LoginForm() {
 
           <input
             type="password"
+            name="password"
             required
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            disabled={loading}
+            disabled={pending}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 disabled:opacity-60"
           />
         </div>
-
-        {status ? (
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            {status}
-          </p>
-        ) : null}
 
         {error ? (
           <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
@@ -204,10 +96,10 @@ export default function LoginForm() {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={pending}
           className="w-full rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white disabled:opacity-60"
         >
-          {loading ? "Signing in..." : "Sign In"}
+          {pending ? "Signing in..." : "Sign In"}
         </button>
       </form>
     </div>

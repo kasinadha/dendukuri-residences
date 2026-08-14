@@ -35,10 +35,10 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // IMPORTANT: Do not run code between createServerClient and getClaims().
-  // Refreshing here keeps the cookie session in sync for Server Components.
-  // Route authorization still uses getUser() in lib/auth.ts (not claims alone).
-  await supabase.auth.getClaims();
+  // IMPORTANT: Do not run code between createServerClient and getUser().
+  // getUser() refreshes the Auth session into cookies for Server Components.
+  // Route authorization also uses getUser() in lib/auth.ts.
+  await supabase.auth.getUser();
 
   return supabaseResponse;
 }
