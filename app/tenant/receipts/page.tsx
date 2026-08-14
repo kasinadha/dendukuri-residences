@@ -1,0 +1,62 @@
+import Link from "next/link";
+import { requireTenant } from "@/lib/auth";
+import {
+  formatDisplayDate,
+  formatInr,
+  listReceiptViews,
+} from "@/lib/receipts";
+
+export default async function TenantReceiptsPage() {
+  const { supabase } = await requireTenant();
+
+  // RLS must restrict to the signed-in tenant's receipts only.
+  const receipts = await listReceiptViews(supabase, { limit: 100 });
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-emerald-700">RECEIPTS</p>
+      <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
+        Your rent receipts
+      </h2>
+      <p className="mt-2 text-slate-500">
+        View-only access to receipts for your tenancy.
+      </p>
+
+      <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {receipts.length === 0 ? (
+          <p className="p-6 text-sm text-slate-500">
+            No receipts are available yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {receipts.map((receipt) => (
+              <li key={receipt.receiptId}>
+                <Link
+                  href={`/tenant/receipts/${receipt.receiptId}`}
+                  className="flex flex-col gap-1 px-5 py-4 transition hover:bg-emerald-50/60 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      {receipt.receiptNumber}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Flat {receipt.flatNumber} · {receipt.billingMonth}
+                    </p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="font-semibold text-slate-900">
+                      {formatInr(receipt.rentAmount)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Paid {formatDisplayDate(receipt.paymentDate)}
+                    </p>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
