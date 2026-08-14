@@ -7,10 +7,12 @@ import {
 } from "@/lib/receipts";
 
 export default async function TenantReceiptsPage() {
-  const { supabase } = await requireTenant();
+  const { supabase, user } = await requireTenant();
 
-  // RLS must restrict to the signed-in tenant's receipts only.
-  const receipts = await listReceiptViews(supabase, { limit: 100 });
+  // Prefer RLS; also filter by linked profile_id as defense in depth.
+  const receipts = (await listReceiptViews(supabase, { limit: 100 })).filter(
+    (row) => row.tenantProfileId === user.id
+  );
 
   return (
     <div>

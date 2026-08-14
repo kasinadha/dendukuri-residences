@@ -3,11 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard, Building2, Users, IndianRupee, Zap,
-  Wrench, Droplets, ContactRound, CircleHelp, BarChart3
+  LayoutDashboard,
+  Building2,
+  Users,
+  IndianRupee,
+  Zap,
+  Wrench,
+  Droplets,
+  ContactRound,
+  CircleHelp,
+  BarChart3,
 } from "lucide-react";
 
-const items = [
+export const adminNavItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Flats", href: "/admin/flats", icon: Building2 },
   { label: "Tenants", href: "/admin/tenants", icon: Users },
@@ -18,7 +26,11 @@ const items = [
   { label: "Vendors", href: "/admin/vendors", icon: ContactRound },
   { label: "FAQs", href: "/admin/faqs", icon: CircleHelp },
   { label: "Reports", href: "/admin/reports", icon: BarChart3 },
-];
+] as const;
+
+function isActivePath(pathname: string, href: string) {
+  return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+}
 
 export default function AdminSidebar() {
   const pathname = usePathname();
@@ -32,10 +44,8 @@ export default function AdminSidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 p-4">
-        {items.map(({ label, href, icon: Icon }) => {
-          const active =
-            href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
-
+        {adminNavItems.map(({ label, href, icon: Icon }) => {
+          const active = isActivePath(pathname, href);
           return (
             <Link
               key={href}

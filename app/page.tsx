@@ -305,7 +305,12 @@ export default function HomePage() {
       <footer className="border-t border-slate-200 py-10">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <p className="font-semibold text-slate-800">Dendukuri&apos;s Residences</p>
-          <p>Comfortable homes for modern families.</p>
+          <div className="flex flex-wrap items-center gap-4">
+            <p>Comfortable homes for modern families.</p>
+            <a href="/login" className="font-medium text-emerald-700 hover:text-emerald-800">
+              Owner / tenant login
+            </a>
+          </div>
         </div>
       </footer>
     </main>

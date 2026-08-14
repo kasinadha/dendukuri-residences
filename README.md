@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dendukuri's Residences
 
-## Getting Started
+Rental property management for Dendukuri's Residences — public marketing site, owner admin, and tenant portal. Built with **Next.js 16** (App Router), React 19, Tailwind CSS 4, and Supabase Auth + Postgres (RLS).
 
-First, run the development server:
+## Features
+
+- **Public site** — property landing page
+- **Admin** — flats, tenants, tenancies, rent payments + receipts, electricity, maintenance, water tankers, vendors, FAQs, reports
+- **Tenant portal** — rent receipts, electricity readings, maintenance requests, vacate requests (scoped to linked tenancy)
+
+## Setup (local)
+
+1. Copy env and fill from Supabase → Project Settings → API:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install and run (prefer **macOS Terminal** — Cursor agent shells may inject HTTP proxies that break Supabase `fetch`):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm ci
+set -a; source .env.local; set +a
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000). Login: `/login`.
 
-## Learn More
+### Auth redirects (Supabase)
 
-To learn more about Next.js, take a look at the following resources:
+In Supabase → Authentication → URL configuration, add:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Site URL: `http://localhost:3000` (and your Vercel URL in production)
+- Redirect URLs: `http://localhost:3000/**`, `https://YOUR_DOMAIN/**`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Link a tenant login
+
+After creating an Auth user and a `profiles` row with `role = tenant`, set `tenants.profile_id` to that user's auth UUID so the portal resolves their flat/tenancy.
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Import [kasinadha/dendukuri-residences](https://github.com/kasinadha/dendukuri-residences) (or this repo) into Vercel.
+2. Set environment variables (Production + Preview):
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+3. Deploy. Update Supabase Auth Site URL / redirect allowlist to the Vercel domain.
+4. Confirm `/login` → admin dashboard and tenant routes work.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Do **not** add `SUPABASE_SERVICE_ROLE_KEY` to the Next.js app.
+
+## Scripts
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Dev server |
+| `npm run build` | Production build |
+| `npm run start` | Serve production build |
+
+## Notes
+
+- Receipt numbers use `DR-YYYYMM-…` with uniqueness retries (`supabase/migrations`).
+- Billing month is stored in `payments.notes` as `billing_month:YYYY-MM`.
+- Schema is live-probed — do not invent columns; electricity units = `current_reading − previous_reading`.

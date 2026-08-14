@@ -1,12 +1,42 @@
-import AdminModulePage from "@/components/admin/AdminModulePage";
-import { Wrench } from "lucide-react";
+import AdminLayout from "@/components/admin/AdminLayout";
+import MaintenancePanel from "@/components/admin/MaintenancePanel";
+import { requireAdmin } from "@/lib/auth";
+import { listFlatsForSelect } from "@/lib/electricity";
+import { listMaintenanceRequests } from "@/lib/maintenance";
+import { formatInr } from "@/lib/receipts";
 
-export default function MaintenancePage() {
+export default async function MaintenancePage() {
+  const { supabase } = await requireAdmin();
+  const [flats, requests] = await Promise.all([
+    listFlatsForSelect(supabase),
+    listMaintenanceRequests(supabase),
+  ]);
+
   return (
-    <AdminModulePage
-      title="Maintenance"
-      description="Track repairs, vendor work, and follow-ups across the property."
-      icon={Wrench}
-    />
+    <AdminLayout>
+      <div>
+        <p className="text-sm font-semibold text-emerald-700">MODULE</p>
+        <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
+          Maintenance
+        </h2>
+        <p className="mt-2 max-w-2xl text-slate-500">
+          Create repair requests and update status as work progresses.
+        </p>
+      </div>
+
+      <MaintenancePanel
+        flats={flats}
+        requests={requests.map((row) => ({
+          id: row.id,
+          flatNumber: row.flatNumber,
+          title: row.title,
+          description: row.description,
+          status: row.status,
+          priority: row.priority,
+          costLabel: row.cost != null ? formatInr(row.cost) : "—",
+          category: row.category,
+        }))}
+      />
+    </AdminLayout>
   );
 }
