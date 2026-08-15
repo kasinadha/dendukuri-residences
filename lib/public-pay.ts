@@ -57,6 +57,13 @@ export async function lookupFlatForPublicPay(
           "Public pay is not set up yet. Ask the owner to run the public payment claims migration.",
       };
     }
+    if (/monthly_rent does not exist/i.test(msg)) {
+      return {
+        ok: false,
+        error:
+          "Flat lookup needs a quick DB fix. Run supabase/migrations/20260815_fix_public_pay_lookup_no_flat_rent.sql in Supabase.",
+      };
+    }
     return { ok: false, error: msg || "Could not look up flat." };
   }
 
