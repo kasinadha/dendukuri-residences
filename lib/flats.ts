@@ -1,9 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PROPERTY_NAME, type PropertyRecord } from "@/lib/property";
 import {
+  contributesToRentExpected,
+  isActiveTenancyStatus,
+  isOccupiedFlatStatus,
   occupancyLabel,
-  parseSourceFromNotes,
-} from "@/lib/tenancies";
+  type OccupancyKind,
+} from "@/lib/occupancy";
+import { PROPERTY_NAME, type PropertyRecord } from "@/lib/property";
+import { parseSourceFromNotes } from "@/lib/tenancies";
 
 export type FlatListItem = {
   id: string;
@@ -11,7 +15,7 @@ export type FlatListItem = {
   type: string;
   floor: string | null;
   status: string;
-  occupancy: "occupied" | "vacant";
+  occupancy: OccupancyKind;
   rent: number | null;
   deposit: number | null;
   maintenanceAmount: number | null;
@@ -55,16 +59,6 @@ type FlatSchemaMode = {
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? value[0] ?? null : value;
-}
-
-function isActiveTenancyStatus(status: string | null | undefined): boolean {
-  const value = (status ?? "").toLowerCase();
-  return value === "active" || value === "occupied" || value === "";
-}
-
-function isOccupiedFlatStatus(status: string | null | undefined): boolean {
-  const value = (status ?? "").toLowerCase();
-  return value === "occupied" || value === "active" || value === "rented";
 }
 
 function num(value: unknown): number | null {
@@ -248,24 +242,24 @@ function mapFlatRow(row: FlatRow): FlatListItem {
       ? [row.tenancies]
       : [];
 
-  const activeTenancy =
+  const currentTenancy =
     tenancies.find((t) => isActiveTenancyStatus(t.status)) ??
-    tenancies[0] ??
+    tenancies.find((t) => (t.status ?? "").toLowerCase() === "confirmed") ??
     null;
 
-  const tenant = unwrapOne(activeTenancy?.tenants ?? null);
-  const tenancyRent = num(activeTenancy?.monthly_rent);
-  const tenancyDeposit = num(activeTenancy?.security_deposit);
+  const tenant = unwrapOne(currentTenancy?.tenants ?? null);
+  const tenancyRent = num(currentTenancy?.monthly_rent);
+  const tenancyDeposit = num(currentTenancy?.security_deposit);
   const columnRent = num(row.monthly_rent);
   const columnDeposit = num(row.deposit);
   const columnMaintenance = num(row.maintenance_amount);
 
   const occupiedFromTenancy = Boolean(
-    activeTenancy && isActiveTenancyStatus(activeTenancy.status)
+    currentTenancy && isActiveTenancyStatus(currentTenancy.status)
   );
   const isOccupied =
     occupiedFromTenancy || isOccupiedFlatStatus(row.status);
-  const occupancy = occupancyLabel(isOccupied);
+  const occupancy = occupancyLabel(isOccupied, row.status);
 
   return {
     id: row.id,
@@ -351,13 +345,18 @@ export async function getFlatPaymentDetails(
 export function summarizeFlats(flats: FlatListItem[]) {
   const total = flats.length;
   const occupied = flats.filter((f) => f.isOccupied).length;
-  const vacant = Math.max(total - occupied, 0);
+  const reserved = flats.filter((f) => f.occupancy === "reserved").length;
+  const vacant = Math.max(total - occupied - reserved, 0);
   const rentExpected = flats.reduce(
-    (sum, flat) => sum + (flat.isOccupied && flat.rent != null ? flat.rent : 0),
+    (sum, flat) =>
+      sum +
+      (contributesToRentExpected({ isOccupied: flat.isOccupied, rent: flat.rent })
+        ? (flat.rent as number)
+        : 0),
     0
   );
 
-  return { total, occupied, vacant, rentExpected };
+  return { total, occupied, vacant, reserved, rentExpected };
 }
 
 async function buildFlatPayload(

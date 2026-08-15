@@ -32,7 +32,12 @@ export default async function AdminDashboard() {
 
   const summary = summarizeFlats(flats);
   const monthLabel = currentMonthLabel();
-  const vacantFlats = flats.filter((f) => !f.isOccupied).slice(0, 6);
+  const vacantFlats = flats
+    .filter((f) => f.occupancy === "vacant")
+    .slice(0, 6);
+  const reservedFlats = flats
+    .filter((f) => f.occupancy === "reserved")
+    .slice(0, 6);
 
   const stats = [
     {
@@ -44,7 +49,7 @@ export default async function AdminDashboard() {
     {
       title: "Occupied",
       value: String(summary.occupied),
-      detail: `${summary.vacant} currently vacant`,
+      detail: `${summary.vacant} vacant · ${summary.reserved} reserved`,
       icon: Users,
     },
     {
@@ -103,55 +108,91 @@ export default async function AdminDashboard() {
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 p-6">
-            <div>
-              <h3 className="text-lg font-bold">Vacant flats</h3>
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 p-6">
+              <div>
+                <h3 className="text-lg font-bold">Vacant flats</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Truly vacant units (excludes reserved)
+                </p>
+              </div>
+              <CircleAlert className="text-amber-500" aria-hidden />
+            </div>
+
+            {vacantFlats.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500">
+                {summary.total === 0
+                  ? "No flats loaded yet."
+                  : "No vacant flats right now."}
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {vacantFlats.map((flat) => (
+                  <div
+                    key={flat.id}
+                    className="flex items-center justify-between gap-4 p-5"
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-800">
+                        Flat {flat.flatNumber}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {flat.type !== "—" ? flat.type : "Type not set"}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold capitalize text-amber-800">
+                      {flat.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="border-t border-slate-100 p-4">
+              <Link
+                href="/admin/flats"
+                className="text-sm font-semibold text-emerald-700 hover:text-emerald-600"
+              >
+                View all flats →
+              </Link>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 p-6">
+              <h3 className="text-lg font-bold">Reserved flats</h3>
               <p className="mt-1 text-sm text-slate-500">
-                Units without an active tenancy
+                Confirmed tenants not yet moved in — rent not expected yet
               </p>
             </div>
-            <CircleAlert className="text-amber-500" aria-hidden />
-          </div>
-
-          {vacantFlats.length === 0 ? (
-            <p className="p-6 text-sm text-slate-500">
-              {summary.total === 0
-                ? "No flats loaded yet."
-                : "All listed flats currently look occupied."}
-            </p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {vacantFlats.map((flat) => (
-                <div
-                  key={flat.id}
-                  className="flex items-center justify-between gap-4 p-5"
-                >
-                  <div>
-                    <p className="font-semibold text-slate-800">
-                      Flat {flat.flatNumber}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {flat.type !== "—" ? flat.type : "Type not set"}
-                    </p>
+            {reservedFlats.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500">No reserved flats.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {reservedFlats.map((flat) => (
+                  <div
+                    key={flat.id}
+                    className="flex items-center justify-between gap-4 p-5"
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-800">
+                        Flat {flat.flatNumber}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {flat.tenantName ?? "Tenant confirmed"}
+                        {flat.rent != null ? ` · ${formatInr(flat.rent)} / mo` : ""}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold capitalize text-sky-800">
+                      reserved
+                    </span>
                   </div>
-                  <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold capitalize text-amber-800">
-                    {flat.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="border-t border-slate-100 p-4">
-            <Link
-              href="/admin/flats"
-              className="text-sm font-semibold text-emerald-700 hover:text-emerald-600"
-            >
-              View all flats →
-            </Link>
-          </div>
-        </section>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-bold">Quick Actions</h3>

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isActiveTenancyStatus } from "@/lib/occupancy";
 import { PROPERTY_NAME } from "@/lib/property";
 
 export const D201_FLAT_NUMBER = "D201";
@@ -18,7 +19,8 @@ export type CreateTenancyInput = {
   monthlyRent: number;
   securityDeposit: number;
   source?: string | null;
-  startDate: string;
+  /** YYYY-MM-DD, or omit/null when move-in is unknown (e.g. confirmed). */
+  startDate?: string | null;
   endDate?: string | null;
   status?: string;
 };
@@ -33,11 +35,11 @@ export type CreateTenancyResult =
     }
   | { ok: false; error: string };
 
-function isActiveTenancyStatus(status: string | null | undefined): boolean {
-  const value = (status ?? "").toLowerCase();
-  return value === "active" || value === "occupied" || value === "";
+function isConfirmedTenancyStatus(status: string | null | undefined): boolean {
+  return (status ?? "").toLowerCase() === "confirmed";
 }
 
+/** @deprecated Prefer `@/lib/occupancy` — kept for existing imports. */
 export function occupancyLabel(occupied: boolean): "occupied" | "vacant" {
   return occupied ? "occupied" : "vacant";
 }
@@ -92,13 +94,23 @@ export async function createTenancyLink(
   if (!Number.isFinite(securityDeposit) || securityDeposit < 0) {
     return { ok: false, error: "Enter a valid security deposit." };
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) {
+  const status = (input.status ?? "active").trim() || "active";
+  const startDate = input.startDate?.trim() || null;
+  if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
     return { ok: false, error: "Start date must be YYYY-MM-DD." };
   }
+  if (!startDate && isActiveTenancyStatus(status)) {
+    return { ok: false, error: "Start date is required for active tenancies." };
+  }
 
-  const status = (input.status ?? "active").trim() || "active";
   const notes = encodeSourceNote(input.source);
   const created = { flat: false, tenant: false, tenancy: false };
+
+  function flatStatusForTenancy(tenancyStatus: string): string {
+    if (isActiveTenancyStatus(tenancyStatus)) return "occupied";
+    if (isConfirmedTenancyStatus(tenancyStatus)) return "reserved";
+    return "vacant";
+  }
 
   let flatId = input.flatId?.trim() || "";
   if (!flatId) {
@@ -113,7 +125,7 @@ export async function createTenancyLink(
     } else {
       const flatPayload: Record<string, unknown> = {
         flat_number: flatNumber,
-        status: isActiveTenancyStatus(status) ? "occupied" : "vacant",
+        status: flatStatusForTenancy(status),
         notes,
         building: PROPERTY_NAME,
       };
@@ -187,7 +199,7 @@ export async function createTenancyLink(
   const tenancyPayload: Record<string, unknown> = {
     flat_id: flatId,
     tenant_id: tenantId,
-    start_date: input.startDate,
+    start_date: startDate,
     end_date: input.endDate?.trim() || null,
     monthly_rent: monthlyRent,
     security_deposit: securityDeposit,
@@ -208,8 +220,10 @@ export async function createTenancyLink(
   }
   created.tenancy = true;
 
-  if (isActiveTenancyStatus(status)) {
-    const flatUpdate: Record<string, unknown> = { status: "occupied" };
+  if (isActiveTenancyStatus(status) || isConfirmedTenancyStatus(status)) {
+    const flatUpdate: Record<string, unknown> = {
+      status: flatStatusForTenancy(status),
+    };
     if (notes) flatUpdate.notes = notes;
     await supabase.from("flats").update(flatUpdate).eq("id", flatId);
   }
@@ -234,19 +248,12 @@ export type EnsureD201Result =
   | { ok: false; error: string };
 
 /**
- * Idempotent seed for the first real record: flat D201.
- * Rent 10000, deposit 50000, source Poster.
+ * Idempotent seed for flat D201: confirmed reservation (not occupied).
+ * Rent 10000, deposit 50000, source Poster. start_date stays NULL until move-in.
  */
 export async function ensureD201Seed(
   supabase: SupabaseClient
 ): Promise<EnsureD201Result> {
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-
   const existingFlat = await findFlatByNumber(supabase, D201_FLAT_NUMBER);
 
   if (existingFlat) {
@@ -255,32 +262,29 @@ export async function ensureD201Seed(
       .select("id,tenant_id,status,monthly_rent,security_deposit")
       .eq("flat_id", existingFlat.id);
 
-    const active =
+    const current =
       (tenancies ?? []).find((t) => isActiveTenancyStatus(t.status)) ??
+      (tenancies ?? []).find(
+        (t) => (t.status ?? "").toLowerCase() === "confirmed"
+      ) ??
       (tenancies ?? [])[0] ??
       null;
 
-    if (active) {
-      const rent = Number(active.monthly_rent);
-      const deposit = Number(active.security_deposit);
-      const needsUpdate =
-        rent !== D201_MONTHLY_RENT || deposit !== D201_SECURITY_DEPOSIT;
-
-      if (needsUpdate) {
-        await supabase
-          .from("tenancies")
-          .update({
-            monthly_rent: D201_MONTHLY_RENT,
-            security_deposit: D201_SECURITY_DEPOSIT,
-            status: "active",
-          })
-          .eq("id", active.id);
-      }
+    if (current) {
+      await supabase
+        .from("tenancies")
+        .update({
+          monthly_rent: D201_MONTHLY_RENT,
+          security_deposit: D201_SECURITY_DEPOSIT,
+          status: "confirmed",
+          start_date: null,
+        })
+        .eq("id", current.id);
 
       await supabase
         .from("flats")
         .update({
-          status: "occupied",
+          status: "reserved",
           building: PROPERTY_NAME,
           notes: encodeSourceNote(D201_SOURCE),
         })
@@ -288,22 +292,21 @@ export async function ensureD201Seed(
 
       return {
         ok: true,
-        status: needsUpdate ? "updated" : "already_present",
+        status: "updated",
         flatId: existingFlat.id,
-        tenantId: active.tenant_id,
-        tenancyId: active.id,
+        tenantId: current.tenant_id,
+        tenancyId: current.id,
       };
     }
 
-    // Flat exists but no tenancy — create tenant + tenancy.
     const created = await createTenancyLink(supabase, {
       flatId: existingFlat.id,
       tenantFullName: D201_TENANT_NAME,
       monthlyRent: D201_MONTHLY_RENT,
       securityDeposit: D201_SECURITY_DEPOSIT,
       source: D201_SOURCE,
-      startDate: today,
-      status: "active",
+      startDate: null,
+      status: "confirmed",
     });
 
     if (!created.ok) return created;
@@ -322,8 +325,8 @@ export async function ensureD201Seed(
     monthlyRent: D201_MONTHLY_RENT,
     securityDeposit: D201_SECURITY_DEPOSIT,
     source: D201_SOURCE,
-    startDate: today,
-    status: "active",
+    startDate: null,
+    status: "confirmed",
   });
 
   if (!created.ok) return created;

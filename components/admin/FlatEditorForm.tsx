@@ -14,7 +14,7 @@ type Props = {
 };
 
 const FLAT_TYPES = ["1BHK", "2BHK"] as const;
-const STATUSES = ["vacant", "occupied", "maintenance"] as const;
+const STATUSES = ["vacant", "reserved", "occupied", "maintenance"] as const;
 
 export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
   const router = useRouter();

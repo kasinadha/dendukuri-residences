@@ -9,8 +9,9 @@ type Props = {
   flats: FlatListItem[];
 };
 
-function statusClasses(occupied: boolean) {
-  if (occupied) return "bg-emerald-50 text-emerald-800";
+function statusClasses(occupancy: string) {
+  if (occupancy === "occupied") return "bg-emerald-50 text-emerald-800";
+  if (occupancy === "reserved") return "bg-sky-50 text-sky-800";
   return "bg-amber-50 text-amber-800";
 }
 
@@ -80,7 +81,7 @@ export default function FlatsInventoryPanel({ flats }: Props) {
                   <div>
                     <span
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClasses(
-                        flat.isOccupied
+                        flat.occupancy
                       )}`}
                     >
                       {flat.occupancy}
