@@ -5,6 +5,7 @@ import {
   Wrench,
   DoorOpen,
   ChevronRight,
+  IndianRupee,
 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
@@ -84,6 +85,12 @@ export default async function TenantHomePage() {
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
         {[
+          {
+            href: "/tenant/pay",
+            icon: IndianRupee,
+            title: "Pay rent",
+            detail: "UPI / QR + submit UTR for confirmation",
+          },
           {
             href: "/tenant/receipts",
             icon: Receipt,

@@ -1,37 +1,125 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { classifyLoginIdentifier } from "@/lib/login-identifier";
 import { createClient } from "@/lib/supabase/server";
 
 export type SignInResult = { ok: false; error: string };
 
+async function resolveEmailForSignIn(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  identifier: string
+): Promise<{ email: string | null; mobile: string | null; error?: string }> {
+  const classified = classifyLoginIdentifier(identifier);
+
+  if (classified.kind === "email" && classified.email) {
+    return { email: classified.email, mobile: null };
+  }
+
+  if (classified.kind === "mobile" && classified.mobile) {
+    const { data, error } = await supabase.rpc("resolve_login_email", {
+      identifier: classified.mobile,
+    });
+
+    if (error) {
+      if (/resolve_login_email|could not find|schema cache/i.test(error.message)) {
+        return {
+          email: null,
+          mobile: classified.mobile,
+          error:
+            "Mobile login is not set up yet. Run supabase/migrations/20260815_phase10_login_email_or_mobile.sql in Supabase, or sign in with email.",
+        };
+      }
+      return {
+        email: null,
+        mobile: classified.mobile,
+        error: `Could not resolve mobile login (${error.message}).`,
+      };
+    }
+
+    const email =
+      typeof data === "string" && data.trim() ? data.trim().toLowerCase() : null;
+    return { email, mobile: classified.mobile };
+  }
+
+  return {
+    email: null,
+    mobile: null,
+    error: "Enter a valid email or 10-digit mobile number.",
+  };
+}
+
+function parseLoginAs(raw: string): "admin" | "tenant" | null {
+  const value = raw.trim().toLowerCase();
+  if (value === "admin" || value === "tenant") return value;
+  return null;
+}
+
 /**
  * Server-side password sign-in so auth cookies are written on the response.
- * Client-only signIn often authenticates in the browser but leaves Server
- * Components without a session (redirect loop → /login?error=session).
+ * Accepts email or Indian mobile (via tenants.phone → profile_id → Auth email).
+ * Requires login_as=admin|tenant and rejects mismatched profiles.role.
  */
 export async function signInWithPasswordAction(
   formData: FormData
 ): Promise<SignInResult> {
-  const email = String(formData.get("email") ?? "")
-    .trim()
-    .toLowerCase();
+  const identifier = String(
+    formData.get("identifier") ?? formData.get("email") ?? ""
+  ).trim();
   const password = String(formData.get("password") ?? "");
+  const loginAs = parseLoginAs(String(formData.get("login_as") ?? ""));
 
-  if (!email || !password) {
-    return { ok: false, error: "Email and password are required." };
+  if (!loginAs) {
+    return {
+      ok: false,
+      error: "Choose Tenant or Admin before signing in.",
+    };
+  }
+
+  if (!identifier || !password) {
+    return {
+      ok: false,
+      error: "Email or mobile, and password, are required.",
+    };
   }
 
   const supabase = await createClient();
+  const resolved = await resolveEmailForSignIn(supabase, identifier);
 
-  const { data: authData, error: signInError } =
-    await supabase.auth.signInWithPassword({
-      email,
+  if (resolved.error && !resolved.email) {
+    return { ok: false, error: resolved.error };
+  }
+
+  let authData: Awaited<
+    ReturnType<typeof supabase.auth.signInWithPassword>
+  >["data"] | null = null;
+  let signInError: { message: string } | null = null;
+
+  if (resolved.email) {
+    const result = await supabase.auth.signInWithPassword({
+      email: resolved.email,
       password,
     });
+    authData = result.data;
+    signInError = result.error;
+  }
 
-  if (signInError) {
-    const msg = signInError.message || "Sign-in failed.";
+  // Fallback: Auth phone identity (+91…) if email resolve missed
+  if ((!authData?.user || signInError) && resolved.mobile) {
+    const phoneResult = await supabase.auth.signInWithPassword({
+      phone: `+91${resolved.mobile}`,
+      password,
+    });
+    if (!phoneResult.error && phoneResult.data.user) {
+      authData = phoneResult.data;
+      signInError = null;
+    } else if (!resolved.email) {
+      signInError = phoneResult.error ?? signInError;
+    }
+  }
+
+  if (signInError || !authData?.user) {
+    const msg = signInError?.message || "Sign-in failed.";
     if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
       return {
         ok: false,
@@ -39,13 +127,17 @@ export async function signInWithPasswordAction(
           "Cannot reach Supabase (network/DNS). Check internet, that NEXT_PUBLIC_SUPABASE_URL is correct, and restart the app from Terminal (not a proxied Cursor shell): npm run start -- -p 3100",
       };
     }
+    if (/invalid login credentials/i.test(msg) && resolved.mobile) {
+      return {
+        ok: false,
+        error:
+          "Invalid credentials, or this mobile is not linked yet. Owner must set tenants.phone and tenants.profile_id to your Auth user.",
+      };
+    }
     return { ok: false, error: msg };
   }
 
-  const userId = authData.user?.id;
-  if (!userId) {
-    return { ok: false, error: "Login failed. Please try again." };
-  }
+  const userId = authData.user.id;
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -66,7 +158,7 @@ export async function signInWithPasswordAction(
     return {
       ok: false,
       error:
-        "Signed in to Auth, but no profiles row exists. Insert profiles with role='admin' and is_active=true for this user.",
+        "Signed in to Auth, but no profiles row exists. Insert profiles with role='tenant' (or admin) and is_active=true for this user.",
     };
   }
 
@@ -79,17 +171,25 @@ export async function signInWithPasswordAction(
     };
   }
 
-  if (profile.role === "admin") {
+  if (profile.role !== loginAs) {
+    await supabase.auth.signOut();
+    if (loginAs === "admin") {
+      return {
+        ok: false,
+        error:
+          "This account is not an admin. Switch to Tenant, or ask the owner to set profiles.role = 'admin'.",
+      };
+    }
+    return {
+      ok: false,
+      error:
+        "This account is not a tenant. Switch to Admin, or ask the owner to set profiles.role = 'tenant' and link tenants.profile_id.",
+    };
+  }
+
+  if (loginAs === "admin") {
     redirect("/admin");
   }
 
-  if (profile.role === "tenant") {
-    redirect("/tenant");
-  }
-
-  await supabase.auth.signOut();
-  return {
-    ok: false,
-    error: `Profile role is "${profile.role ?? "unknown"}" — expected "admin" or "tenant".`,
-  };
+  redirect("/tenant");
 }

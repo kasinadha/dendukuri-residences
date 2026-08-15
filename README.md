@@ -36,7 +36,10 @@ In Supabase → Authentication → URL configuration, add:
 
 ### Link a tenant login
 
-After creating an Auth user and a `profiles` row with `role = tenant`, set `tenants.profile_id` to that user's auth UUID so the portal resolves their flat/tenancy.
+1. Create an Auth user (email + password) in Supabase Auth.
+2. Insert `profiles` with `role = tenant` and `is_active = true` for that Auth UUID.
+3. Set `tenants.profile_id` to that UUID so the portal resolves their flat/tenancy.
+4. Keep a correct `tenants.phone` (10-digit) if they should sign in with **mobile + password** (login resolves phone → Auth email via `resolve_login_email`). Run `supabase/migrations/20260815_phase10_login_email_or_mobile.sql` once.
 
 ## Deploy on Vercel
 

@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import {
+  approvePaymentSubmission,
+  rejectPaymentSubmission,
+} from "@/lib/payment-submissions";
+import {
   encodeBillingMonthNote,
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
@@ -19,6 +23,38 @@ export type RecordPaymentResult =
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
+}
+
+export async function approvePaymentSubmissionAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const result = await approvePaymentSubmission(supabase, {
+    id: asString(formData, "id"),
+    adminNotes: asString(formData, "admin_notes") || null,
+    reviewedBy: user.id,
+  });
+  if (result.ok) {
+    revalidatePath("/admin/payments");
+    revalidatePath("/admin/receipts");
+    revalidatePath("/tenant/receipts");
+    revalidatePath("/tenant/pay");
+    revalidatePath("/tenant");
+  }
+  return result;
+}
+
+export async function rejectPaymentSubmissionAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const result = await rejectPaymentSubmission(supabase, {
+    id: asString(formData, "id"),
+    adminNotes: asString(formData, "admin_notes") || null,
+    reviewedBy: user.id,
+  });
+  if (result.ok) {
+    revalidatePath("/admin/payments");
+    revalidatePath("/tenant/pay");
+    revalidatePath("/tenant");
+  }
+  return result;
 }
 
 export async function recordRentPayment(

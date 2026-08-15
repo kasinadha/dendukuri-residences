@@ -48,7 +48,7 @@ export async function requireAdmin(): Promise<SessionContext> {
   const session = await getSessionProfile();
 
   if (!session.user) {
-    redirect("/login?error=session");
+    redirect("/login?as=admin&error=session");
   }
 
   if (
@@ -56,7 +56,7 @@ export async function requireAdmin(): Promise<SessionContext> {
     !session.profile.is_active ||
     session.profile.role !== "admin"
   ) {
-    redirect("/login?error=unauthorized");
+    redirect("/login?as=admin&error=unauthorized");
   }
 
   return {
@@ -70,7 +70,7 @@ export async function requireTenant(): Promise<SessionContext> {
   const session = await getSessionProfile();
 
   if (!session.user) {
-    redirect("/login?error=session");
+    redirect("/login?as=tenant&error=session");
   }
 
   if (
@@ -78,7 +78,7 @@ export async function requireTenant(): Promise<SessionContext> {
     !session.profile.is_active ||
     session.profile.role !== "tenant"
   ) {
-    redirect("/login?error=unauthorized");
+    redirect("/login?as=tenant&error=unauthorized");
   }
 
   return {

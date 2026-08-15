@@ -2,13 +2,77 @@
 
 import { revalidatePath } from "next/cache";
 import { requireTenant } from "@/lib/auth";
+import { getFlatPaymentDetails } from "@/lib/flats";
 import { createMaintenanceRequest } from "@/lib/maintenance";
 import { createVacateRequest } from "@/lib/ops";
+import {
+  uploadPaymentProof,
+  validatePaymentProofFile,
+} from "@/lib/payment-proofs";
+import { createPaymentSubmission } from "@/lib/payment-submissions";
+import { resolveRentUpiDisplay } from "@/lib/rent-upi";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asFile(formData: FormData, key: string): File | null {
+  const value = formData.get(key);
+  return value instanceof File ? value : null;
+}
+
+export async function tenantSubmitRentPayment(formData: FormData) {
+  const { supabase, user } = await requireTenant();
+  const ctx = await getTenantPortalContext(supabase, user.id);
+  if (!ctx?.tenancyId) {
+    return { ok: false as const, error: "No active tenancy on your account." };
+  }
+
+  const tenancyId = asString(formData, "tenancy_id") || ctx.tenancyId;
+  if (tenancyId !== ctx.tenancyId) {
+    return { ok: false as const, error: "Invalid tenancy." };
+  }
+
+  const proofFile = asFile(formData, "proof");
+  const validated = validatePaymentProofFile(proofFile);
+  if (!validated.ok) return { ok: false as const, error: validated.error };
+
+  let proofPath: string | null = null;
+  if (validated.file) {
+    const uploaded = await uploadPaymentProof(supabase, {
+      userId: user.id,
+      file: validated.file,
+    });
+    if (!uploaded.ok) return { ok: false as const, error: uploaded.error };
+    proofPath = uploaded.path;
+  }
+
+  const flatUpi = ctx.flatId
+    ? await getFlatPaymentDetails(supabase, ctx.flatId)
+    : null;
+  const { upiId } = resolveRentUpiDisplay(flatUpi);
+  const amount = Number(asString(formData, "amount"));
+
+  const result = await createPaymentSubmission(supabase, {
+    tenancyId,
+    billingMonth: asString(formData, "billing_month"),
+    amount,
+    paymentDate: asString(formData, "payment_date"),
+    utr: asString(formData, "utr"),
+    upiId,
+    notes: asString(formData, "notes") || null,
+    proofPath,
+    submittedBy: user.id,
+  });
+
+  if (result.ok) {
+    revalidatePath("/tenant");
+    revalidatePath("/tenant/pay");
+    revalidatePath("/admin/payments");
+  }
+  return result;
 }
 
 export async function tenantCreateMaintenance(formData: FormData) {

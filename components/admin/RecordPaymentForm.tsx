@@ -12,7 +12,7 @@ export type TenancyOption = {
 
 const PAYMENT_METHODS = [
   { value: "upi", label: "UPI" },
-  { value: "bank_transfer", label: "Bank transfer" },
+  { value: "bank_transfer", label: "Bank transfer / NEFT" },
   { value: "cash", label: "Cash" },
   { value: "cheque", label: "Cheque" },
   { value: "card", label: "Card" },

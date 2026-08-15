@@ -307,7 +307,7 @@ export default function HomePage() {
           <p className="font-semibold text-slate-800">Dendukuri&apos;s Residences</p>
           <div className="flex flex-wrap items-center gap-4">
             <p>Comfortable homes for modern families.</p>
-            <a href="/login" className="font-medium text-emerald-700 hover:text-emerald-800">
+            <a href="/login?as=tenant" className="font-medium text-emerald-700 hover:text-emerald-800">
               Owner / tenant login
             </a>
           </div>

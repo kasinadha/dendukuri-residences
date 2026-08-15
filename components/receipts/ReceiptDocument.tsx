@@ -15,6 +15,8 @@ function methodLabel(value: string): string {
     cash: "Cash",
     cheque: "Cheque",
     card: "Card",
+    neft: "NEFT",
+    other: "Other",
   };
   return map[value] ?? value;
 }

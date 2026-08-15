@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { PROPERTY_NAME } from "@/lib/property";
 
 export const D201_FLAT_NUMBER = "D201";
 export const D201_MONTHLY_RENT = 10000;
@@ -114,6 +115,7 @@ export async function createTenancyLink(
         flat_number: flatNumber,
         status: isActiveTenancyStatus(status) ? "occupied" : "vacant",
         notes,
+        building: PROPERTY_NAME,
       };
       if (input.flatType?.trim()) {
         flatPayload.flat_type = input.flatType.trim();
@@ -279,6 +281,7 @@ export async function ensureD201Seed(
         .from("flats")
         .update({
           status: "occupied",
+          building: PROPERTY_NAME,
           notes: encodeSourceNote(D201_SOURCE),
         })
         .eq("id", existingFlat.id);

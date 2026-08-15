@@ -3,11 +3,16 @@
 import { LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LogoutButton() {
+type Props = {
+  /** Prefill Tenant/Admin toggle after logout. */
+  loginAs?: "admin" | "tenant";
+};
+
+export default function LogoutButton({ loginAs = "admin" }: Props) {
   async function logout() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    window.location.href = "/login";
+    window.location.href = `/login?as=${loginAs}`;
   }
 
   return (

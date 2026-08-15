@@ -5,6 +5,7 @@ import { requireTenant } from "@/lib/auth";
 
 const nav = [
   { href: "/tenant", label: "Home" },
+  { href: "/tenant/pay", label: "Pay rent" },
   { href: "/tenant/receipts", label: "Receipts" },
   { href: "/tenant/electricity", label: "Electricity" },
   { href: "/tenant/maintenance", label: "Maintenance" },
@@ -35,7 +36,7 @@ export default async function TenantLayout({
               </p>
               <p className="text-xs text-slate-500">Tenant</p>
             </div>
-            <LogoutButton />
+            <LogoutButton loginAs="tenant" />
           </div>
         </div>
         <nav className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-3 pb-3">
