@@ -100,6 +100,12 @@ export default function HomePage() {
               >
                 View Gallery
               </a>
+              <a
+                href="/pay"
+                className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-7 py-3.5 font-semibold text-emerald-200 transition hover:bg-emerald-500/25"
+              >
+                Pay rent or dues
+              </a>
             </div>
 
             <div className="mt-12 flex flex-wrap gap-x-8 gap-y-4 text-sm text-slate-300">
@@ -307,6 +313,9 @@ export default function HomePage() {
           <p className="font-semibold text-slate-800">Dendukuri&apos;s Residences</p>
           <div className="flex flex-wrap items-center gap-4">
             <p>Comfortable homes for modern families.</p>
+            <a href="/pay" className="font-medium text-emerald-700 hover:text-emerald-800">
+              Pay without login
+            </a>
             <a href="/login?as=tenant" className="font-medium text-emerald-700 hover:text-emerald-800">
               Owner / tenant login
             </a>

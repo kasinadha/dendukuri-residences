@@ -1,22 +1,57 @@
 import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
+import PaymentSubmissionsPanel from "@/components/admin/PaymentSubmissionsPanel";
 import RecordPaymentForm, {
   type TenancyOption,
 } from "@/components/admin/RecordPaymentForm";
 import { requireAdmin } from "@/lib/auth";
+import { isActiveTenancyStatus } from "@/lib/occupancy";
+import { listPaymentSubmissions } from "@/lib/payment-submissions";
+import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   formatDisplayDate,
   formatInr,
-  listReceiptViews,
 } from "@/lib/receipts";
+import {
+  getRentMonthSummary,
+  listPaymentHistory,
+} from "@/lib/rent-month";
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-export default async function PaymentsPage() {
+function statusBadgeClass(status: string) {
+  switch (status) {
+    case "paid":
+      return "bg-emerald-50 text-emerald-800";
+    case "partial":
+      return "bg-amber-50 text-amber-900";
+    case "overdue":
+      return "bg-red-50 text-red-800";
+    case "waived":
+      return "bg-slate-100 text-slate-700";
+    default:
+      return "bg-sky-50 text-sky-800";
+  }
+}
+
+type Props = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function PaymentsPage({ searchParams }: Props) {
   const { supabase } = await requireAdmin();
+  const params = (await searchParams) ?? {};
+  const month =
+    typeof params.month === "string" && /^\d{4}-\d{2}$/.test(params.month)
+      ? params.month
+      : undefined;
+  const flat = typeof params.flat === "string" ? params.flat : undefined;
+  const tenant = typeof params.tenant === "string" ? params.tenant : undefined;
+  const status =
+    typeof params.status === "string" ? params.status : undefined;
 
   const { data: tenancyRows } = await supabase
     .from("tenancies")
@@ -31,40 +66,35 @@ export default async function PaymentsPage() {
     )
     .order("created_at", { ascending: false });
 
-  const tenancies: TenancyOption[] = (tenancyRows ?? [])
-    .filter((row) => {
-      const status = (row.status ?? "").toLowerCase();
-      return status === "active" || status === "occupied" || status === "";
-    })
+  const tenancyOptions: TenancyOption[] = (tenancyRows ?? [])
+    .filter((row) => isActiveTenancyStatus(row.status))
     .map((row) => {
-      const tenant = unwrapOne(row.tenants);
-      const flat = unwrapOne(row.flats);
+      const tenantRow = unwrapOne(row.tenants);
+      const flatRow = unwrapOne(row.flats);
       const rent =
         row.monthly_rent == null ? null : Number(row.monthly_rent);
       return {
         id: row.id,
+        flatNumber: flatRow?.flat_number?.trim() || "—",
+        tenantName: tenantRow?.full_name?.trim() || "Tenant",
         monthlyRent: Number.isFinite(rent) ? rent : null,
-        label: `Flat ${flat?.flat_number ?? "?"} — ${tenant?.full_name ?? "Tenant"}`,
+        label: `Flat ${flatRow?.flat_number ?? "?"} — ${tenantRow?.full_name ?? "Tenant"}`,
       };
     });
 
-  // If status filter emptied the list, fall back to all tenancies.
-  const tenancyOptions =
-    tenancies.length > 0
-      ? tenancies
-      : (tenancyRows ?? []).map((row) => {
-          const tenant = unwrapOne(row.tenants);
-          const flat = unwrapOne(row.flats);
-          const rent =
-            row.monthly_rent == null ? null : Number(row.monthly_rent);
-          return {
-            id: row.id,
-            monthlyRent: Number.isFinite(rent) ? rent : null,
-            label: `Flat ${flat?.flat_number ?? "?"} — ${tenant?.full_name ?? "Tenant"}`,
-          };
-        });
+  const [monthSummary, history, pendingSubmissions] = await Promise.all([
+    getRentMonthSummary(supabase, month),
+    listPaymentHistory(supabase, {
+      month,
+      flat,
+      tenant,
+      status,
+      limit: 80,
+    }),
+    listPaymentSubmissions(supabase, { status: "pending", limit: 40 }),
+  ]);
 
-  const receipts = await listReceiptViews(supabase, { limit: 40 });
+  const filterMonth = month ?? monthSummary.billingMonthKey;
 
   return (
     <AdminLayout>
@@ -75,59 +105,227 @@ export default async function PaymentsPage() {
             Rent & Payments
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Record rent collections and issue receipts with unique receipt
-            numbers.
+            Record collections against active tenancies, track status, and
+            issue unique receipts. Confirmed/reserved units are excluded until
+            move-in.
           </p>
         </div>
+        <a
+          href="#record-payment"
+          className="mt-4 rounded-xl bg-emerald-600 px-5 py-3 text-center text-sm font-semibold text-white sm:mt-0"
+        >
+          Record Payment
+        </a>
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {[
+          {
+            title: "Current month",
+            value: monthSummary.billingMonthLabel,
+            detail: filterMonth,
+          },
+          {
+            title: "Rent expected",
+            value: formatInr(monthSummary.rentExpected),
+            detail: "Active tenancies only",
+          },
+          {
+            title: "Rent collected",
+            value: formatInr(monthSummary.rentCollected),
+            detail: `${monthSummary.paidTenants} paid · ${monthSummary.partialTenants} partial`,
+          },
+          {
+            title: "Outstanding",
+            value: formatInr(monthSummary.outstanding),
+            detail: `${monthSummary.pendingTenants} pending/overdue`,
+          },
+          {
+            title: "Paid tenants",
+            value: String(monthSummary.paidTenants),
+            detail: "Fully paid or waived",
+          },
+          {
+            title: "Pending tenants",
+            value: String(monthSummary.pendingTenants),
+            detail: `${monthSummary.overdueTenants} overdue`,
+          },
+        ].map((card) => (
+          <div
+            key={card.title}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <p className="text-sm font-medium text-slate-500">{card.title}</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{card.value}</p>
+            <p className="mt-2 text-xs text-slate-500">{card.detail}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-8">
+        <PaymentSubmissionsPanel submissions={pendingSubmissions} />
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <RecordPaymentForm tenancies={tenancyOptions} />
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-5 sm:p-6">
-            <h3 className="text-lg font-bold text-slate-900">Recent receipts</h3>
+            <h3 className="text-lg font-bold text-slate-900">
+              Month ledger — {monthSummary.billingMonthLabel}
+            </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Open any receipt to print or save as PDF.
+              Per active tenancy for the selected month.
             </p>
           </div>
-
-          {receipts.length === 0 ? (
+          {monthSummary.rows.length === 0 ? (
             <p className="p-6 text-sm text-slate-500">
-              No receipts yet. Record a payment to generate the first one.
+              No active tenancies for rent this month.
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {receipts.map((receipt) => (
-                <li key={receipt.receiptId}>
-                  <Link
-                    href={`/admin/receipts/${receipt.receiptId}`}
-                    className="flex flex-col gap-1 px-5 py-4 transition hover:bg-emerald-50/60 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-                  >
-                    <div>
-                      <p className="font-semibold text-slate-900">
-                        {receipt.receiptNumber}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Flat {receipt.flatNumber} · {receipt.tenantName} ·{" "}
-                        {receipt.billingMonth}
-                      </p>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <p className="font-semibold text-slate-900">
-                        {formatInr(receipt.rentAmount)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Paid {formatDisplayDate(receipt.paymentDate)}
-                      </p>
-                    </div>
-                  </Link>
+              {monthSummary.rows.map((row) => (
+                <li
+                  key={row.tenancyId}
+                  className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      Flat {row.flatNumber} · {row.tenantName}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Due {formatInr(row.amountDue)} · Paid{" "}
+                      {formatInr(row.amountPaid)}
+                      {row.outstanding > 0
+                        ? ` · Outstanding ${formatInr(row.outstanding)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(
+                        row.status
+                      )}`}
+                    >
+                      {paymentStatusLabel(row.status)}
+                    </span>
+                    {row.lastReceiptId ? (
+                      <Link
+                        href={`/admin/receipts/${row.lastReceiptId}`}
+                        className="text-sm font-semibold text-emerald-700"
+                      >
+                        View Receipt
+                      </Link>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </section>
       </div>
+
+      <section className="mt-8 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-5 sm:p-6">
+          <h3 className="text-lg font-bold text-slate-900">Payment history</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Filter by month, flat, tenant, or status. Historical rows are kept
+            when tenancies end.
+          </p>
+          <form
+            method="get"
+            className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+          >
+            <input
+              type="month"
+              name="month"
+              defaultValue={filterMonth}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            />
+            <input
+              name="flat"
+              placeholder="Flat"
+              defaultValue={flat ?? ""}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            />
+            <input
+              name="tenant"
+              placeholder="Tenant"
+              defaultValue={tenant ?? ""}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            />
+            <select
+              name="status"
+              defaultValue={status ?? ""}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="">All statuses</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="pending">Pending</option>
+              <option value="overdue">Overdue</option>
+              <option value="waived">Waived</option>
+            </select>
+            <button
+              type="submit"
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Apply filters
+            </button>
+          </form>
+        </div>
+
+        {history.length === 0 ? (
+          <p className="p-6 text-sm text-slate-500">No payments match.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {history.map((row) => (
+              <li
+                key={row.paymentId}
+                className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+              >
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    Flat {row.flatNumber} · {row.tenantName}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {row.billingMonthLabel} · Paid {formatInr(row.amountPaid)}
+                    {row.amountDue != null
+                      ? ` of ${formatInr(row.amountDue)}`
+                      : ""}{" "}
+                    · {formatDisplayDate(row.paymentDate)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(
+                      row.status
+                    )}`}
+                  >
+                    {paymentStatusLabel(row.status)}
+                  </span>
+                  {row.receiptId ? (
+                    <>
+                      <Link
+                        href={`/admin/receipts/${row.receiptId}`}
+                        className="text-sm font-semibold text-emerald-700"
+                      >
+                        View Receipt
+                      </Link>
+                      <Link
+                        href={`/admin/receipts/${row.receiptId}`}
+                        className="text-sm font-semibold text-slate-600"
+                      >
+                        Download / Print
+                      </Link>
+                    </>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </AdminLayout>
   );
 }

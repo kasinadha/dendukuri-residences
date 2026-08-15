@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
+import { isActiveTenancyStatus } from "@/lib/occupancy";
 import {
   approvePaymentSubmission,
   rejectPaymentSubmission,
 } from "@/lib/payment-submissions";
+import { computePaymentStatus } from "@/lib/payment-status";
 import {
   encodeBillingMonthNote,
   insertReceiptWithUniqueNumber,
@@ -35,9 +37,11 @@ export async function approvePaymentSubmissionAction(formData: FormData) {
   if (result.ok) {
     revalidatePath("/admin/payments");
     revalidatePath("/admin/receipts");
+    revalidatePath("/admin");
     revalidatePath("/tenant/receipts");
     revalidatePath("/tenant/pay");
     revalidatePath("/tenant");
+    revalidatePath("/pay");
   }
   return result;
 }
@@ -63,12 +67,14 @@ export async function recordRentPayment(
   const { supabase } = await requireAdmin();
 
   const tenancyId = asString(formData, "tenancy_id");
-  const amountRaw = asString(formData, "amount_paid");
+  const amountDueRaw = asString(formData, "amount_due");
+  const amountPaidRaw = asString(formData, "amount_paid");
   const paymentDate = asString(formData, "payment_date");
   const paymentMode = asString(formData, "payment_mode");
   const billingMonth = asString(formData, "billing_month");
   const transactionReference = asString(formData, "transaction_reference");
   const notes = asString(formData, "notes");
+  const waived = asString(formData, "waived") === "1";
 
   if (!tenancyId) return { ok: false, error: "Select a tenancy." };
   if (!paymentDate) return { ok: false, error: "Payment date is required." };
@@ -77,14 +83,21 @@ export async function recordRentPayment(
     return { ok: false, error: "Billing month must be a valid month." };
   }
 
-  const amountPaid = Number(amountRaw);
-  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
-    return { ok: false, error: "Enter a valid rent amount." };
+  const amountDue = Number(amountDueRaw);
+  const amountPaid = Number(amountPaidRaw);
+  if (!Number.isFinite(amountDue) || amountDue < 0) {
+    return { ok: false, error: "Enter a valid amount due." };
+  }
+  if (!waived && (!Number.isFinite(amountPaid) || amountPaid < 0)) {
+    return { ok: false, error: "Enter a valid amount paid." };
+  }
+  if (!waived && amountPaid <= 0) {
+    return { ok: false, error: "Amount paid must be greater than zero." };
   }
 
   const { data: tenancy, error: tenancyError } = await supabase
     .from("tenancies")
-    .select("id,status")
+    .select("id,status,monthly_rent")
     .eq("id", tenancyId)
     .maybeSingle();
 
@@ -92,14 +105,27 @@ export async function recordRentPayment(
     return { ok: false, error: "Tenancy not found." };
   }
 
-  const paymentPayload = {
+  if (!isActiveTenancyStatus(tenancy.status)) {
+    return {
+      ok: false,
+      error:
+        "Only ACTIVE tenancies can have rent recorded. Confirmed/reserved flats (e.g. D201 before move-in) are excluded.",
+    };
+  }
+
+  const status = waived
+    ? "waived"
+    : computePaymentStatus(amountDue, amountPaid);
+
+  const paymentPayload: Record<string, unknown> = {
     tenancy_id: tenancyId,
     payment_date: paymentDate,
-    amount_paid: amountPaid,
+    amount_paid: waived ? 0 : amountPaid,
+    amount_due: amountDue,
     payment_mode: paymentMode,
     payment_type: "rent",
     transaction_reference: transactionReference || null,
-    status: "paid",
+    status,
     notes: encodeBillingMonthNote(billingMonth, notes || undefined),
   };
 
@@ -110,9 +136,26 @@ export async function recordRentPayment(
     .single();
 
   if (paymentError || !payment) {
+    const msg = paymentError?.message ?? "Could not record payment.";
+    if (/amount_due|column .* does not exist/i.test(msg)) {
+      return {
+        ok: false,
+        error:
+          "Database needs Phase 11 migration. Run supabase/migrations/20260815_phase11_rent_payment_receipts.sql",
+      };
+    }
+    return { ok: false, error: msg };
+  }
+
+  // Receipt only when money was collected (or waived acknowledgement)
+  if (!waived && amountPaid <= 0) {
+    revalidatePath("/admin/payments");
+    revalidatePath("/admin");
     return {
-      ok: false,
-      error: paymentError?.message ?? "Could not record payment.",
+      ok: true,
+      paymentId: payment.id,
+      receiptId: "",
+      receiptNumber: "(no receipt — zero paid)",
     };
   }
 
@@ -121,6 +164,7 @@ export async function recordRentPayment(
 
     revalidatePath("/admin/payments");
     revalidatePath("/admin/receipts");
+    revalidatePath("/admin");
     revalidatePath("/tenant/receipts");
 
     return {
@@ -130,7 +174,6 @@ export async function recordRentPayment(
       receiptNumber: receipt.receipt_number,
     };
   } catch (error) {
-    // Compensating delete so we do not leave a payment without a receipt.
     await supabase.from("payments").delete().eq("id", payment.id);
 
     return {

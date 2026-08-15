@@ -72,6 +72,14 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
           </div>
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Receipt date
+            </dt>
+            <dd className="mt-1 text-base font-semibold text-slate-900">
+              {formatDisplayDate(receipt.createdAt)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Billing month
             </dt>
             <dd className="mt-1 text-base font-semibold text-slate-900">
@@ -83,7 +91,15 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
               Rent amount
             </dt>
             <dd className="mt-1 text-base font-semibold text-slate-900">
-              {formatInr(receipt.rentAmount)}
+              {formatInr(receipt.amountDue ?? receipt.rentAmount)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Amount paid
+            </dt>
+            <dd className="mt-1 text-base font-semibold text-slate-900">
+              {formatInr(receipt.amountPaid)}
             </dd>
           </div>
           <div>
@@ -104,7 +120,7 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
           </div>
           <div className="sm:col-span-2">
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Transaction reference
+              Transaction / reference number
             </dt>
             <dd className="mt-1 text-base font-semibold text-slate-900">
               {receipt.transactionReference}

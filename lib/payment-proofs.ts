@@ -45,24 +45,16 @@ export function validatePaymentProofFile(
  * Uploads a tenant payment screenshot to private Storage.
  * Path: `{userId}/{timestamp}-{random}.{ext}`
  */
-export async function uploadPaymentProof(
+async function uploadProofToPath(
   supabase: SupabaseClient,
-  input: { userId: string; file: File }
+  path: string,
+  file: File
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
-  const validated = validatePaymentProofFile(input.file);
-  if (!validated.ok) return validated;
-  if (!validated.file) {
-    return { ok: false, error: "No proof file provided." };
-  }
-
-  const ext = extForMime(validated.file.type);
-  const path = `${input.userId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
-
   const { error } = await supabase.storage
     .from(PAYMENT_PROOFS_BUCKET)
-    .upload(path, validated.file, {
+    .upload(path, file, {
       cacheControl: "3600",
-      contentType: validated.file.type,
+      contentType: file.type,
       upsert: false,
     });
 
@@ -78,6 +70,37 @@ export async function uploadPaymentProof(
   }
 
   return { ok: true, path };
+}
+
+export async function uploadPaymentProof(
+  supabase: SupabaseClient,
+  input: { userId: string; file: File }
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const validated = validatePaymentProofFile(input.file);
+  if (!validated.ok) return validated;
+  if (!validated.file) {
+    return { ok: false, error: "No proof file provided." };
+  }
+
+  const ext = extForMime(validated.file.type);
+  const path = `${input.userId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  return uploadProofToPath(supabase, path, validated.file);
+}
+
+/** Anon/public pay claims: path must start with `public-claims/` (RLS). */
+export async function uploadPublicPaymentProof(
+  supabase: SupabaseClient,
+  file: File
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const validated = validatePaymentProofFile(file);
+  if (!validated.ok) return validated;
+  if (!validated.file) {
+    return { ok: false, error: "No proof file provided." };
+  }
+
+  const ext = extForMime(validated.file.type);
+  const path = `public-claims/${crypto.randomUUID()}/${Date.now()}.${ext}`;
+  return uploadProofToPath(supabase, path, validated.file);
 }
 
 export async function createPaymentProofSignedUrl(

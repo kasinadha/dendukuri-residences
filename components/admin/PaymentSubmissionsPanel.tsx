@@ -7,6 +7,7 @@ import {
   rejectPaymentSubmissionAction,
 } from "@/app/admin/payments/actions";
 import type { PaymentSubmission } from "@/lib/payment-submissions";
+import { purposeLabel } from "@/lib/public-pay";
 import { formatBillingMonthLabel, formatInr } from "@/lib/receipts";
 
 type Props = {
@@ -33,7 +34,13 @@ export default function PaymentSubmissionsPanel({ submissions }: Props) {
         setError(result.error);
         return;
       }
-      setMessage(`Approved — receipt ${result.receiptNumber} created.`);
+      if (result.claimOnly) {
+        setMessage(
+          "Approved as claim only (no tenancy on flat — no receipt created)."
+        );
+      } else {
+        setMessage(`Approved — receipt ${result.receiptNumber} created.`);
+      }
       router.refresh();
     });
   }
@@ -63,7 +70,8 @@ export default function PaymentSubmissionsPanel({ submissions }: Props) {
           Pending UTR confirmations
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          Approve to create the rent payment and receipt automatically.
+          Includes tenant portal submissions and public (no-login) claims.
+          Approve to create payment + receipt when a tenancy exists.
         </p>
       </div>
 
@@ -89,14 +97,27 @@ export default function PaymentSubmissionsPanel({ submissions }: Props) {
             >
               <div className="min-w-0 flex-1">
                 <p className="font-semibold text-slate-900">
-                  Flat {row.flatNumber} · {row.tenantName}
+                  Flat {row.flatNumber} · {purposeLabel(row.purpose)}
+                  {row.isPublicClaim ? (
+                    <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                      Public claim
+                    </span>
+                  ) : null}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
-                  {formatBillingMonthLabel(row.billingMonth)} ·{" "}
-                  {formatInr(row.amount)} · UTR {row.utr}
+                  {row.payerName
+                    ? `${row.payerName}${
+                        row.payerPhone ? ` · ${row.payerPhone}` : ""
+                      }`
+                    : row.tenantName}
+                  {row.billingMonth
+                    ? ` · ${formatBillingMonthLabel(row.billingMonth)}`
+                    : ""}{" "}
+                  · {formatInr(row.amount)} · UTR {row.utr}
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
                   Paid {row.paymentDate}
+                  {!row.tenancyId ? " · no tenancy linked yet" : ""}
                   {row.notes ? ` · ${row.notes}` : ""}
                 </p>
                 {row.proofUrl ? (

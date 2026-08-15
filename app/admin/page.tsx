@@ -13,7 +13,7 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin, summarizeFlats } from "@/lib/flats";
 import { formatInr } from "@/lib/receipts";
-import { listTenantsForAdmin } from "@/lib/tenants";
+import { getRentMonthSummary } from "@/lib/rent-month";
 
 function currentMonthLabel() {
   return new Intl.DateTimeFormat("en-IN", {
@@ -25,9 +25,9 @@ function currentMonthLabel() {
 
 export default async function AdminDashboard() {
   const { supabase } = await requireAdmin();
-  const [flats, tenants] = await Promise.all([
+  const [flats, rentMonth] = await Promise.all([
     listFlatsForAdmin(supabase),
-    listTenantsForAdmin(supabase),
+    getRentMonthSummary(supabase),
   ]);
 
   const summary = summarizeFlats(flats);
@@ -54,14 +54,14 @@ export default async function AdminDashboard() {
     },
     {
       title: "Rent Expected",
-      value: formatInr(summary.rentExpected),
-      detail: monthLabel,
+      value: formatInr(rentMonth.rentExpected),
+      detail: `${monthLabel} · active tenancies`,
       icon: IndianRupee,
     },
     {
-      title: "Tenants",
-      value: String(tenants.length),
-      detail: `${tenants.filter((t) => t.hasActiveTenancy).length} with active tenancy`,
+      title: "Rent Collected",
+      value: formatInr(rentMonth.rentCollected),
+      detail: `Outstanding ${formatInr(rentMonth.outstanding)}`,
       icon: CircleAlert,
     },
   ];

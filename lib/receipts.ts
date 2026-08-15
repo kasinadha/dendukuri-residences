@@ -16,6 +16,7 @@ export type PaymentRecord = {
   tenancy_id: string;
   payment_date: string;
   amount_paid: number | string;
+  amount_due?: number | string | null;
   payment_mode: string | null;
   payment_type: string | null;
   transaction_reference: string | null;
@@ -34,6 +35,8 @@ export type ReceiptViewModel = {
   billingMonth: string;
   billingMonthKey: string;
   rentAmount: number;
+  amountDue: number | null;
+  amountPaid: number;
   paymentDate: string;
   paymentMethod: string;
   transactionReference: string;
@@ -42,7 +45,8 @@ export type ReceiptViewModel = {
 };
 
 /** YYYY-MM → "August 2026" (en-IN). */
-export function formatBillingMonthLabel(yearMonth: string): string {
+export function formatBillingMonthLabel(yearMonth: string | null | undefined): string {
+  if (!yearMonth?.trim()) return "—";
   const match = /^(\d{4})-(\d{2})$/.exec(yearMonth.trim());
   if (!match) return yearMonth;
 
@@ -103,10 +107,21 @@ export function formatDisplayDate(isoDate: string): string {
   }).format(date);
 }
 
+/** Current billing month key YYYY-MM in Asia/Kolkata. */
+export function currentBillingMonthKeyFromParts(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value ?? "2026";
+  const month = parts.find((p) => p.type === "month")?.value ?? "01";
+  return `${year}-${month}`;
+}
+
 /**
- * Generates a unique receipt number.
- * Relies on a UNIQUE constraint on receipts.receipt_number (see supabase/migrations).
- * Retries on unique_violation (23505).
+ * Allocates unique receipt number DR-YYYY-NNNN via DB counter when available.
+ * Falls back to unique DR-YYYYMM-HEX (legacy) with retry on unique_violation.
  */
 export function generateReceiptNumber(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -129,7 +144,21 @@ export async function insertReceiptWithUniqueNumber(
   let lastError: { message: string; code?: string } | null = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const receipt_number = generateReceiptNumber();
+    let receipt_number: string | null = null;
+
+    const { data: allocated, error: allocError } = await supabase.rpc(
+      "allocate_receipt_number"
+    );
+    if (
+      !allocError &&
+      typeof allocated === "string" &&
+      /^DR-\d{4}-\d{4}$/.test(allocated)
+    ) {
+      receipt_number = allocated;
+    } else {
+      receipt_number = generateReceiptNumber();
+    }
+
     const { data, error } = await supabase
       .from("receipts")
       .insert({ payment_id: paymentId, receipt_number })
@@ -141,7 +170,6 @@ export async function insertReceiptWithUniqueNumber(
     }
 
     lastError = error;
-    // Unique violation — retry with a new number.
     if (error?.code === "23505") {
       continue;
     }
@@ -195,10 +223,19 @@ export function toReceiptViewModel(
     billingMonthKey ??
     payment.payment_date.slice(0, 7);
 
-  const amount =
+  const amountPaid =
     typeof payment.amount_paid === "string"
       ? Number(payment.amount_paid)
       : Number(payment.amount_paid);
+  const amountDueRaw =
+    payment.amount_due == null
+      ? null
+      : typeof payment.amount_due === "string"
+        ? Number(payment.amount_due)
+        : Number(payment.amount_due);
+  const amountDue =
+    amountDueRaw != null && Number.isFinite(amountDueRaw) ? amountDueRaw : null;
+  const paid = Number.isFinite(amountPaid) ? amountPaid : 0;
 
   return {
     receiptId: receipt.id,
@@ -209,7 +246,9 @@ export function toReceiptViewModel(
     flatNumber: flat?.flat_number ?? "—",
     billingMonth: formatBillingMonthLabel(key),
     billingMonthKey: key,
-    rentAmount: Number.isFinite(amount) ? amount : 0,
+    rentAmount: amountDue ?? paid,
+    amountDue,
+    amountPaid: paid,
     paymentDate: payment.payment_date,
     paymentMethod: payment.payment_mode ?? "—",
     transactionReference: payment.transaction_reference?.trim() || "—",
@@ -238,6 +277,7 @@ export async function fetchReceiptViewById(
       tenancy_id,
       payment_date,
       amount_paid,
+      amount_due,
       payment_mode,
       payment_type,
       transaction_reference,
@@ -286,6 +326,7 @@ export async function listReceiptViews(
       tenancy_id,
       payment_date,
       amount_paid,
+      amount_due,
       payment_mode,
       payment_type,
       transaction_reference,
