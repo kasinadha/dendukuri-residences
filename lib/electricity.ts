@@ -8,8 +8,10 @@ import {
   type ElectricityBillingConfig,
   type FlatElectricityBillBreakdown,
 } from "@/lib/electricity-billing";
+import { buildingWingFromFlatNumber } from "@/lib/building-wing";
+import type { FlatLocationOption } from "@/lib/expense-location";
 
-export type FlatOption = { id: string; label: string };
+export type FlatOption = FlatLocationOption;
 
 export type ElectricityReading = {
   id: string;
@@ -75,10 +77,15 @@ export async function listFlatsForSelect(
     .select("id,flat_number")
     .order("flat_number", { ascending: true });
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    label: `Flat ${row.flat_number ?? "?"}`,
-  }));
+  return (data ?? []).map((row) => {
+    const flatNumber = row.flat_number?.trim() || "?";
+    return {
+      id: row.id,
+      label: `Flat ${flatNumber}`,
+      flatNumber,
+      building: buildingWingFromFlatNumber(flatNumber),
+    };
+  });
 }
 
 export async function listOccupiedFlatsForBilling(

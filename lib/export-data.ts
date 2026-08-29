@@ -5,8 +5,10 @@ import {
   type BuildingWing,
 } from "@/lib/building-wing";
 import { rowsToCsv, type CsvRow } from "@/lib/csv";
+import { expenseBuildingWingLabel } from "@/lib/expense-location";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { listMaintenanceRequests } from "@/lib/maintenance";
+import { listOperationalExpenses } from "@/lib/operational-expenses";
 import { listWaterTankers } from "@/lib/ops";
 import { parseBillingMonthFromNotes } from "@/lib/receipts";
 
@@ -353,13 +355,28 @@ async function exportExpenses(
   supabase: SupabaseClient,
   filters: ExportFilters
 ): Promise<CsvRow[]> {
-  const [tankers, maintenance] = await Promise.all([
+  const [tankers, maintenance, otherExpenses] = await Promise.all([
     listWaterTankers(supabase),
     listMaintenanceRequests(supabase, { limit: 5000 }),
+    listOperationalExpenses(supabase, { limit: 5000 }),
   ]);
 
   const tankerRows: CsvRow[] = tankers
     .filter((row) => {
+      if (row.flatNumber) {
+        if (!matchesBuilding(row.flatNumber, filters.building ?? "all")) {
+          return false;
+        }
+        if (!matchesFlat(row.flatNumber, filters.flat)) return false;
+      } else if (row.buildingWing && row.buildingWing !== "shared") {
+        if (
+          filters.building &&
+          filters.building !== "all" &&
+          row.buildingWing !== filters.building
+        ) {
+          return false;
+        }
+      }
       if (!matchesDateRange(row.deliveryDate, filters.fromDate, filters.toDate)) {
         return false;
       }
@@ -368,8 +385,10 @@ async function exportExpenses(
     .map((row) => ({
       expense_type: "water_tanker",
       date: row.deliveryDate,
-      flat_number: "",
-      building: "",
+      flat_number: row.flatNumber ?? "",
+      building: row.flatNumber
+        ? buildingWingLabel(buildingWingFromFlatNumber(row.flatNumber))
+        : expenseBuildingWingLabel(row.buildingWing),
       description: row.vendorName ?? "Water tanker",
       amount: row.amount,
       payment_status: row.paymentStatus,
@@ -398,7 +417,41 @@ async function exportExpenses(
       notes: row.description,
     }));
 
-  return [...tankerRows, ...maintenanceRows];
+  const otherRows: CsvRow[] = otherExpenses
+    .filter((row) => {
+      const flatNumber = row.flatNumber ?? "";
+      if (flatNumber) {
+        if (!matchesBuilding(flatNumber, filters.building ?? "all")) return false;
+        if (!matchesFlat(flatNumber, filters.flat)) return false;
+      } else if (row.buildingWing && row.buildingWing !== "shared") {
+        if (
+          filters.building &&
+          filters.building !== "all" &&
+          row.buildingWing !== filters.building
+        ) {
+          return false;
+        }
+      }
+      if (!matchesDateRange(row.expenseDate, filters.fromDate, filters.toDate)) {
+        return false;
+      }
+      return true;
+    })
+    .map((row) => ({
+      expense_type: "other",
+      date: row.expenseDate,
+      flat_number: row.flatNumber ?? "",
+      building: row.flatNumber
+        ? buildingWingLabel(buildingWingFromFlatNumber(row.flatNumber))
+        : expenseBuildingWingLabel(row.buildingWing),
+      description: row.title,
+      amount: row.amount,
+      payment_status: "recorded",
+      paid_by: row.payerAccountLabel ?? "",
+      notes: row.notes,
+    }));
+
+  return [...tankerRows, ...maintenanceRows, ...otherRows];
 }
 
 export async function buildExportCsv(

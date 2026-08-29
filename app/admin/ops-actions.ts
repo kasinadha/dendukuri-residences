@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
+import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
 import {
   completeMoveRequest,
   createVendor,
@@ -9,7 +10,9 @@ import {
   updateVacateStatus,
   updateWaterTankerPaymentStatus,
 } from "@/lib/ops";
-import { markRentReminded } from "@/lib/reminders";
+import { buildRentReminderMessage, markRentReminded } from "@/lib/reminders";
+import { parseExpenseBuildingWing } from "@/lib/expense-location";
+import { sendWhatsAppBusinessMessage } from "@/lib/whatsapp";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -31,16 +34,27 @@ export async function createVendorAction(formData: FormData) {
 export async function createWaterTankerAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const amountRaw = asString(formData, "amount");
+  const buildingWing = parseExpenseBuildingWing(asString(formData, "building_wing"));
+  const payerAccountId = asString(formData, "payer_account_id");
+  if (!buildingWing) {
+    return { ok: false as const, error: "Select which building this tanker is for." };
+  }
+  if (!payerAccountId) {
+    return { ok: false as const, error: "Select who paid for this tanker." };
+  }
   const result = await createWaterTanker(supabase, {
     deliveryDate: asString(formData, "delivery_date"),
     amount: amountRaw ? Number(amountRaw) : null,
     vendorId: asString(formData, "vendor_id") || null,
     paymentStatus: asString(formData, "payment_status") || "pending",
-    payerAccountId: asString(formData, "payer_account_id") || null,
+    buildingWing,
+    flatId: asString(formData, "flat_id") || null,
+    payerAccountId,
     notes: asString(formData, "notes") || null,
   });
   if (result.ok) revalidatePath("/admin/water");
   if (result.ok) revalidatePath("/admin/reports");
+  if (result.ok) revalidatePath("/admin/expenses");
   return result;
 }
 
@@ -92,6 +106,56 @@ export async function markRentRemindedAction(formData: FormData) {
     revalidatePath("/admin/payments");
   }
   return result;
+}
+
+export async function sendWhatsAppReminderAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const tenancyId = asString(formData, "tenancy_id");
+  const billingMonth = asString(formData, "billing_month");
+  if (!tenancyId || !/^\d{4}-\d{2}$/.test(billingMonth)) {
+    return { ok: false as const, error: "Missing tenancy or billing month." };
+  }
+
+  const summary = await getMonthlyDuesSummary(supabase, billingMonth);
+  const row = summary.rows.find((item) => item.tenancyId === tenancyId);
+  if (!row) {
+    return { ok: false as const, error: "Tenancy not found for this month." };
+  }
+
+  const { data: tenancyMeta } = await supabase
+    .from("tenancies")
+    .select("id, tenants ( phone )")
+    .eq("id", tenancyId)
+    .maybeSingle();
+
+  const tenant = Array.isArray(tenancyMeta?.tenants)
+    ? tenancyMeta?.tenants[0]
+    : tenancyMeta?.tenants;
+  const phone = tenant?.phone?.trim() || null;
+  if (!phone) {
+    return { ok: false as const, error: "Tenant has no mobile number on file." };
+  }
+
+  const message = buildRentReminderMessage(row);
+  const sendResult = await sendWhatsAppBusinessMessage({
+    toPhone: phone,
+    body: message,
+  });
+  if (!sendResult.ok) return sendResult;
+
+  const markResult = await markRentReminded(supabase, {
+    tenancyId,
+    billingMonth,
+    remindedBy: user.id,
+    channel: "whatsapp_api",
+    notes: `wa_message_id:${sendResult.messageId}`,
+  });
+
+  if (!markResult.ok) return markResult;
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/payments");
+  return { ok: true as const, messageId: sendResult.messageId };
 }
 
 export async function updateWaterTankerPaymentStatusAction(formData: FormData) {

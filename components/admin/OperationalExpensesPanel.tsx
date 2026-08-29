@@ -2,19 +2,19 @@
 
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createWaterTankerAction } from "@/app/admin/ops-actions";
+import { createOperationalExpenseAction } from "@/app/admin/expenses/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
 import ExpenseLocationFields from "@/components/admin/ExpenseLocationFields";
+import { formatExpenseLocation } from "@/lib/expense-location";
 import type { FlatLocationOption } from "@/lib/expense-location";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
 
-type VendorOption = { id: string; label: string };
-type WaterRow = {
+type ExpenseRow = {
   id: string;
-  deliveryDate: string;
+  expenseDate: string;
+  title: string;
+  category: string | null;
   amountLabel: string;
-  vendorName: string;
-  paymentStatus: string;
   locationLabel: string;
   payerLabel: string | null;
   notes: string | null;
@@ -29,16 +29,14 @@ function todayIsoDate(): string {
   }).format(new Date());
 }
 
-export default function WaterPanel({
-  vendors,
+export default function OperationalExpensesPanel({
+  flats,
   rows,
   accounts,
-  flats,
 }: {
-  vendors: VendorOption[];
-  rows: WaterRow[];
-  accounts: PaymentAccountOption[];
   flats: FlatLocationOption[];
+  rows: ExpenseRow[];
+  accounts: PaymentAccountOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -51,12 +49,12 @@ export default function WaterPanel({
     setSuccess("");
     const formData = new FormData(event.currentTarget);
     startTransition(async () => {
-      const result = await createWaterTankerAction(formData);
+      const result = await createOperationalExpenseAction(formData);
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      setSuccess("Tanker order saved.");
+      setSuccess("Expense saved.");
       event.currentTarget.reset();
       router.refresh();
     });
@@ -68,23 +66,18 @@ export default function WaterPanel({
         onSubmit={handleSubmit}
         className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
       >
-        <h3 className="text-lg font-bold text-slate-900">Record tanker</h3>
+        <h3 className="text-lg font-bold text-slate-900">Record expense</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Include building, optional flat, and who paid.
+          Cleaning, supplies, society fees, and other property costs.
         </p>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <ExpenseLocationFields
-            flats={flats}
-            buildingRequired
-            flatHint="Optional — whole building or common area if blank."
-          />
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
-              Delivery date
+              Date
             </span>
             <input
               type="date"
-              name="delivery_date"
+              name="expense_date"
               required
               defaultValue={todayIsoDate()}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
@@ -99,45 +92,43 @@ export default function WaterPanel({
               name="amount"
               min={0}
               step={1}
+              required
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Title
+            </span>
+            <input
+              name="title"
+              required
+              placeholder="Society fee, cleaning, hardware, etc."
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
             />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
-              Vendor
+              Category
             </span>
-            <select
-              name="vendor_id"
+            <input
+              name="category"
+              placeholder="cleaning / supplies / society"
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-              defaultValue=""
-            >
-              <option value="">Optional</option>
-              {vendors.map((vendor) => (
-                <option key={vendor.id} value={vendor.id}>
-                  {vendor.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-700">
-              Payment status
-            </span>
-            <select
-              name="payment_status"
-              defaultValue="pending"
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-            >
-              <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
-            </select>
-          </label>
+          <ExpenseLocationFields
+            flats={flats}
+            buildingRequired={false}
+            flatRequired={false}
+            flatHint="Optional — pick a flat or leave blank for building/common."
+          />
           <div className="sm:col-span-2">
             <AccountSelectField
               accounts={accounts}
               name="payer_account_id"
               label="Paid by (account)"
-              hint="Who paid for this tanker — Joint, Kasi, Kanthu, or Pratyu."
+              hint="Who paid — Joint, Kasi, Kanthu, or Pratyu."
               required
               allowEmpty={false}
             />
@@ -168,27 +159,31 @@ export default function WaterPanel({
           disabled={pending}
           className="mt-6 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
         >
-          {pending ? "Saving…" : "Save order"}
+          {pending ? "Saving…" : "Save expense"}
         </button>
       </form>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
-          <h3 className="text-lg font-bold text-slate-900">Orders</h3>
+          <h3 className="text-lg font-bold text-slate-900">Recent expenses</h3>
         </div>
         {rows.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500">No tanker orders yet.</p>
+          <p className="p-6 text-sm text-slate-500">No other expenses yet.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {rows.map((row) => (
               <li key={row.id} className="px-5 py-4">
                 <p className="font-semibold text-slate-900">
-                  {row.deliveryDate} · {row.amountLabel}
+                  {row.expenseDate} · {row.title} · {row.amountLabel}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
-                  {row.locationLabel} · {row.vendorName} · {row.paymentStatus}
+                  {row.locationLabel}
+                  {row.category ? ` · ${row.category}` : ""}
                   {row.payerLabel ? ` · Paid by ${row.payerLabel}` : ""}
                 </p>
+                {row.notes ? (
+                  <p className="mt-1 text-sm text-slate-600">{row.notes}</p>
+                ) : null}
               </li>
             ))}
           </ul>

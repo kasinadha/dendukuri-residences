@@ -17,7 +17,7 @@ const DATASET_LABELS: Record<ExportDataset, string> = {
   payments: "Rent payments",
   receipts: "Receipts",
   tenancies: "Tenancies",
-  expenses: "Expenses (water + maintenance)",
+  expenses: "Expenses (water + maintenance + other)",
 };
 
 export default function ExportDataPanel({ flats }: Props) {

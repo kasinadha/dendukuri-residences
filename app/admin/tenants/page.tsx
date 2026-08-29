@@ -1,3 +1,4 @@
+import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
 import TenantDetailsEditor from "@/components/admin/TenantDetailsEditor";
 import TenantLoginActions from "@/components/admin/TenantLoginActions";
@@ -8,14 +9,24 @@ import { formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
 import { listUnpaidRentReminders } from "@/lib/reminders";
 
-export default async function TenantsPage() {
+export default async function TenantsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ show?: string }>;
+}) {
   const { supabase } = await requireAdmin();
+  const params = (await searchParams) ?? {};
+  const showFormer = params.show === "former" || params.show === "all";
+
   const [tenants, flats, unpaidDues] = await Promise.all([
     listTenantsForAdmin(supabase),
     listFlatsForAdmin(supabase),
     listUnpaidRentReminders(supabase),
   ]);
-  const activeCount = tenants.filter((t) => t.hasActiveTenancy).length;
+
+  const activeTenants = tenants.filter((t) => t.hasActiveTenancy);
+  const formerTenants = tenants.filter((t) => !t.hasActiveTenancy);
+  const visibleTenants = showFormer ? tenants : activeTenants;
   const vacantFlats = flats
     .filter((f) => !f.isOccupied)
     .map((f) => ({
@@ -32,19 +43,51 @@ export default async function TenantsPage() {
             Tenants
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Tenant profiles with linked flat, rent, monthly charges, and
+            Active tenants with linked flat, rent, monthly charges, and
             advance/deposit. Contact details are freely editable; rent, charges,
             and advance are locked and need confirmation to change.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
-          <span className="rounded-xl bg-white px-3 py-2 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
-            {tenants.length} tenants
-          </span>
           <span className="rounded-xl bg-emerald-50 px-3 py-2 font-semibold text-emerald-800 ring-1 ring-emerald-100">
-            {activeCount} with active tenancy
+            {activeTenants.length} active
           </span>
+          {formerTenants.length > 0 ? (
+            <span className="rounded-xl bg-white px-3 py-2 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
+              {formerTenants.length} former
+            </span>
+          ) : null}
         </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+        {showFormer ? (
+          <>
+            <span className="font-semibold text-slate-700">
+              Showing all tenants (active + former)
+            </span>
+            <Link
+              href="/admin/tenants"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm"
+            >
+              Active only
+            </Link>
+          </>
+        ) : (
+          <>
+            <span className="font-semibold text-slate-700">
+              Showing active tenants only
+            </span>
+            {formerTenants.length > 0 ? (
+              <Link
+                href="/admin/tenants?show=former"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm"
+              >
+                Show former ({formerTenants.length})
+              </Link>
+            ) : null}
+          </>
+        )}
       </div>
 
       {unpaidDues.rows.length > 0 ? (
@@ -66,9 +109,11 @@ export default async function TenantsPage() {
       ) : null}
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {tenants.length === 0 ? (
+        {visibleTenants.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
-            No tenants found. Add tenants in Supabase to see them here.
+            {showFormer
+              ? "No tenants found. Add tenants in Supabase to see them here."
+              : "No active tenants right now."}
           </p>
         ) : (
           <>
@@ -86,7 +131,7 @@ export default async function TenantsPage() {
               <span>Details</span>
             </div>
             <ul className="divide-y divide-slate-100">
-              {tenants.map((tenant) => (
+              {visibleTenants.map((tenant) => (
                 <li
                   key={tenant.id}
                   className="grid gap-2 px-5 py-4 lg:grid-cols-[0.9fr_0.85fr_0.5fr_0.45fr_0.55fr_0.75fr_0.75fr_0.5fr_0.8fr_0.75fr_0.9fr] lg:items-start lg:gap-2 lg:px-6"

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { endTenancy, transferTenancy } from "@/lib/tenancies";
+import type { ExpenseBuildingWing } from "@/lib/expense-location";
 
 export type Vendor = {
   id: string;
@@ -17,6 +18,9 @@ export type WaterTanker = {
   vendorId: string | null;
   vendorName: string | null;
   paymentStatus: string | null;
+  buildingWing: ExpenseBuildingWing | null;
+  flatId: string | null;
+  flatNumber: string | null;
   payerAccountId: string | null;
   payerAccountLabel: string | null;
   notes: string | null;
@@ -100,9 +104,12 @@ export async function listWaterTankers(
       notes,
       payment_status,
       payer_account_id,
+      building_wing,
+      flat_id,
       created_at,
       vendors ( name ),
-      payment_accounts ( label )
+      payment_accounts ( label ),
+      flats ( flat_number )
     `
     )
     .order("delivery_date", { ascending: false })
@@ -115,8 +122,16 @@ export async function listWaterTankers(
     const payerAccount = Array.isArray(row.payment_accounts)
       ? row.payment_accounts[0]
       : row.payment_accounts;
+    const flat = Array.isArray(row.flats) ? row.flats[0] : row.flats;
     const amount =
       row.amount == null ? null : Number(row.amount);
+    const buildingWingRaw = String(row.building_wing ?? "").trim().toUpperCase();
+    const buildingWing: ExpenseBuildingWing | null =
+      buildingWingRaw === "C" || buildingWingRaw === "D"
+        ? buildingWingRaw
+        : buildingWingRaw === "SHARED"
+          ? "shared"
+          : null;
     return {
       id: row.id,
       deliveryDate: row.delivery_date,
@@ -124,6 +139,9 @@ export async function listWaterTankers(
       vendorId: row.vendor_id,
       vendorName: vendor?.name?.trim() || null,
       paymentStatus: row.payment_status,
+      buildingWing,
+      flatId: row.flat_id,
+      flatNumber: flat?.flat_number?.trim() || null,
       payerAccountId: row.payer_account_id,
       payerAccountLabel: payerAccount?.label?.trim() || null,
       notes: row.notes,
@@ -139,12 +157,20 @@ export async function createWaterTanker(
     amount?: number | null;
     vendorId?: string | null;
     paymentStatus?: string | null;
-    payerAccountId?: string | null;
+    buildingWing: ExpenseBuildingWing;
+    flatId?: string | null;
+    payerAccountId: string;
     notes?: string | null;
   }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.deliveryDate) {
     return { ok: false, error: "Delivery date is required." };
+  }
+  if (!input.buildingWing) {
+    return { ok: false, error: "Select which building this tanker is for." };
+  }
+  if (!input.payerAccountId.trim()) {
+    return { ok: false, error: "Select who paid for this tanker." };
   }
 
   const { data, error } = await supabase
@@ -154,7 +180,9 @@ export async function createWaterTanker(
       amount: input.amount ?? null,
       vendor_id: input.vendorId || null,
       payment_status: input.paymentStatus?.trim() || "pending",
-      payer_account_id: input.payerAccountId || null,
+      building_wing: input.buildingWing,
+      flat_id: input.flatId || null,
+      payer_account_id: input.payerAccountId,
       notes: input.notes?.trim() || null,
     })
     .select("id")

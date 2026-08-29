@@ -52,7 +52,7 @@ export async function getBuildingRevenueReport(
 ): Promise<BuildingRevenueReport> {
   const billingMonth = options?.billingMonth?.trim() || null;
 
-  const [paymentsResult, accountsResult, tankersResult, maintenanceResult] =
+  const [paymentsResult, accountsResult, tankersResult, maintenanceResult, otherResult] =
     await Promise.all([
       supabase
         .from("payments")
@@ -83,6 +83,9 @@ export async function getBuildingRevenueReport(
         .from("maintenance_requests")
         .select("id,cost,payer_account_id,payment_accounts(label)")
         .not("cost", "is", null),
+      supabase
+        .from("operational_expenses")
+        .select("id,amount,payer_account_id,payment_accounts(label)"),
     ]);
 
   const accountLabelById = new Map<string, string>();
@@ -163,6 +166,24 @@ export async function getBuildingRevenueReport(
 
   for (const row of maintenanceResult.data ?? []) {
     const amount = num(row.cost);
+    if (amount <= 0) continue;
+    totalExpenses += amount;
+    const accountId = row.payer_account_id ?? null;
+    const accountFromJoin = unwrapOne(row.payment_accounts);
+    const label =
+      accountFromJoin?.label?.trim() ||
+      (accountId ? accountLabelById.get(accountId) : null) ||
+      "Unassigned";
+    const prev = expenseTotals.get(accountId) ?? { spent: 0, count: 0, label };
+    expenseTotals.set(accountId, {
+      spent: prev.spent + amount,
+      count: prev.count + 1,
+      label,
+    });
+  }
+
+  for (const row of otherResult.data ?? []) {
+    const amount = num(row.amount);
     if (amount <= 0) continue;
     totalExpenses += amount;
     const accountId = row.payer_account_id ?? null;

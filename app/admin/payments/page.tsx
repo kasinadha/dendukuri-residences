@@ -26,6 +26,7 @@ import {
 } from "@/lib/reminders";
 import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
 import { listPaymentHistory } from "@/lib/rent-month";
+import { getWhatsAppBusinessConfig } from "@/lib/whatsapp";
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
@@ -75,6 +76,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
     `
     )
     .order("created_at", { ascending: false });
+
+  const whatsapp = getWhatsAppBusinessConfig();
 
   const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
     await Promise.all([
@@ -192,6 +195,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
           billingMonthKey={unpaidReminders.billingMonthKey}
           billingMonthLabel={unpaidReminders.billingMonthLabel}
           rows={unpaidReminders.rows}
+          whatsappBusinessPhone={whatsapp.businessPhoneDisplay}
+          whatsappApiEnabled={whatsapp.apiEnabled}
         />
         <OwnerDuesRemindersPanel items={ownerDues} />
       </div>

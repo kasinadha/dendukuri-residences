@@ -20,6 +20,7 @@ import {
   listUnpaidRentReminders,
 } from "@/lib/reminders";
 import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
+import { getWhatsAppBusinessConfig } from "@/lib/whatsapp";
 
 function currentMonthLabel() {
   return new Intl.DateTimeFormat("en-IN", {
@@ -31,6 +32,7 @@ function currentMonthLabel() {
 
 export default async function AdminDashboard() {
   const { supabase } = await requireAdmin();
+  const whatsapp = getWhatsAppBusinessConfig();
   const [flats, rentMonth, unpaidReminders, ownerDues] = await Promise.all([
     listFlatsForAdmin(supabase),
     getMonthlyDuesSummary(supabase),
@@ -120,6 +122,8 @@ export default async function AdminDashboard() {
           billingMonthKey={unpaidReminders.billingMonthKey}
           billingMonthLabel={unpaidReminders.billingMonthLabel}
           rows={unpaidReminders.rows}
+          whatsappBusinessPhone={whatsapp.businessPhoneDisplay}
+          whatsappApiEnabled={whatsapp.apiEnabled}
         />
         <OwnerDuesRemindersPanel items={ownerDues} />
       </div>
