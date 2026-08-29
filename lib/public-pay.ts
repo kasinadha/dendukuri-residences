@@ -8,15 +8,12 @@ export type PublicFlatPayInfo = {
   status: string | null;
   upiId: string | null;
   upiQrUrl: string | null;
-  monthlyRent: number | null;
-  maintenanceAmount: number | null;
-  deposit: number | null;
 };
 
-function num(value: unknown): number | null {
-  if (value == null || value === "") return null;
-  const n = typeof value === "string" ? Number(value) : Number(value);
-  return Number.isFinite(n) ? n : null;
+function asTrimmedString(value: unknown): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text || null;
 }
 
 export function purposeLabel(purpose: PaymentPurpose | string | null | undefined): string {
@@ -57,11 +54,11 @@ export async function lookupFlatForPublicPay(
           "Public pay is not set up yet. Ask the owner to run the public payment claims migration.",
       };
     }
-    if (/monthly_rent does not exist/i.test(msg)) {
+    if (/monthly_rent does not exist|deposit does not exist|maintenance_amount does not exist/i.test(msg)) {
       return {
         ok: false,
         error:
-          "Flat lookup needs a quick DB fix. Run supabase/migrations/20260815_fix_public_pay_lookup_no_flat_rent.sql in Supabase.",
+          "Flat lookup needs a privacy update. Run supabase/migrations/20260829_public_pay_no_amount_leak.sql in Supabase.",
       };
     }
     return { ok: false, error: msg || "Could not look up flat." };
@@ -78,14 +75,8 @@ export async function lookupFlatForPublicPay(
       flatId: row.flat_id as string,
       flatNumber: String(row.flat_number ?? trimmed).trim(),
       status: row.status != null ? String(row.status) : null,
-      upiId: row.upi_id?.trim?.() || (row.upi_id ? String(row.upi_id).trim() : null) || null,
-      upiQrUrl:
-        row.upi_qr_url?.trim?.() ||
-        (row.upi_qr_url ? String(row.upi_qr_url).trim() : null) ||
-        null,
-      monthlyRent: num(row.monthly_rent),
-      maintenanceAmount: num(row.maintenance_amount),
-      deposit: num(row.deposit),
+      upiId: asTrimmedString(row.upi_id),
+      upiQrUrl: asTrimmedString(row.upi_qr_url),
     },
   };
 }

@@ -11,6 +11,9 @@ export type TenantListItem = {
   monthlyRent: number | null;
   tenancyStatus: string | null;
   hasActiveTenancy: boolean;
+  tenancyId: string | null;
+  profileId: string | null;
+  hasPortalLogin: boolean;
 };
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
@@ -36,6 +39,7 @@ type TenantRow = {
   full_name: string | null;
   email: string | null;
   phone: string | null;
+  profile_id: string | null;
   tenancies: TenancyJoin | TenancyJoin[] | null;
 };
 
@@ -50,6 +54,7 @@ export async function listTenantsForAdmin(
       full_name,
       email,
       phone,
+      profile_id,
       tenancies (
         id,
         status,
@@ -96,6 +101,12 @@ export async function listTenantsForAdmin(
       hasActiveTenancy: Boolean(
         activeTenancy && isActiveTenancyStatus(activeTenancy.status)
       ),
+      tenancyId:
+        activeTenancy && isActiveTenancyStatus(activeTenancy.status)
+          ? activeTenancy.id
+          : null,
+      profileId: row.profile_id ?? null,
+      hasPortalLogin: Boolean(row.profile_id),
     };
   });
 }

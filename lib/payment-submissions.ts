@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import { mapProofPathsToSignedUrls } from "@/lib/payment-proofs";
+import { resolveReceiverAccountId } from "@/lib/payment-accounts";
 import { purposeLabel, type PaymentPurpose } from "@/lib/public-pay";
 import {
   encodeBillingMonthNote,
@@ -365,7 +367,12 @@ async function resolveTenancyForSubmission(
  */
 export async function approvePaymentSubmission(
   supabase: SupabaseClient,
-  input: { id: string; adminNotes?: string | null; reviewedBy: string }
+  input: {
+    id: string;
+    adminNotes?: string | null;
+    reviewedBy: string;
+    receiverAccountId?: string | null;
+  }
 ): Promise<
   | {
       ok: true;
@@ -442,7 +449,42 @@ export async function approvePaymentSubmission(
       .format(new Date())
       .slice(0, 7);
 
-  const paymentPayload = {
+  let flatNumber: string | null = null;
+  let flatUpiQrUrl: string | null = null;
+  let flatPaymentAccountId: string | null = null;
+  if (submission.flat_id) {
+    const { data: flat } = await supabase
+      .from("flats")
+      .select("flat_number,upi_qr_url,payment_account_id")
+      .eq("id", submission.flat_id)
+      .maybeSingle();
+    flatNumber = flat?.flat_number ?? null;
+    flatUpiQrUrl = flat?.upi_qr_url ?? null;
+    flatPaymentAccountId = flat?.payment_account_id ?? null;
+  } else if (tenancyId) {
+    const { data: tenancy } = await supabase
+      .from("tenancies")
+      .select("flats(flat_number,upi_qr_url,payment_account_id)")
+      .eq("id", tenancyId)
+      .maybeSingle();
+    const flat = Array.isArray(tenancy?.flats)
+      ? tenancy?.flats[0]
+      : tenancy?.flats;
+    flatNumber = flat?.flat_number ?? null;
+    flatUpiQrUrl = flat?.upi_qr_url ?? null;
+    flatPaymentAccountId = flat?.payment_account_id ?? null;
+  }
+
+  const receiverAccountId = await resolveReceiverAccountId(supabase, {
+    explicitAccountId:
+      input.receiverAccountId || submission.receiver_account_id || null,
+    upiId: submission.upi_id,
+    upiQrUrl: flatUpiQrUrl,
+    flatPaymentAccountId,
+    buildingWing: buildingWingFromFlatNumber(flatNumber),
+  });
+
+  const paymentPayload: Record<string, unknown> = {
     tenancy_id: tenancyId,
     payment_date: submission.payment_date,
     amount_paid: submission.amount,
@@ -468,6 +510,10 @@ export async function approvePaymentSubmission(
     ),
   };
 
+  if (receiverAccountId) {
+    paymentPayload.receiver_account_id = receiverAccountId;
+  }
+
   const { data: payment, error: paymentError } = await supabase
     .from("payments")
     .insert(paymentPayload)
@@ -490,6 +536,7 @@ export async function approvePaymentSubmission(
         status: "approved",
         payment_id: payment.id,
         tenancy_id: tenancyId,
+        receiver_account_id: receiverAccountId,
         admin_notes: input.adminNotes?.trim() || null,
         reviewed_by: input.reviewedBy,
         reviewed_at: new Date().toISOString(),

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isActiveTenancyStatus } from "@/lib/occupancy";
 
 export type TenantPortalContext = {
   tenantId: string;
@@ -13,11 +14,6 @@ export type TenantPortalContext = {
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? value[0] ?? null : value;
-}
-
-function isActive(status: string | null | undefined): boolean {
-  const value = (status ?? "").toLowerCase();
-  return value === "active" || value === "occupied" || value === "";
 }
 
 /**
@@ -54,7 +50,7 @@ export async function getTenantPortalContext(
       : [];
 
   const active =
-    tenancies.find((t) => isActive(t.status)) ?? tenancies[0] ?? null;
+    tenancies.find((t) => isActiveTenancyStatus(t.status)) ?? null;
   const flat = unwrapOne(active?.flats ?? null);
   const rentRaw =
     active?.monthly_rent == null ? null : Number(active.monthly_rent);

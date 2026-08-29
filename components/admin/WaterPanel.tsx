@@ -3,6 +3,8 @@
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createWaterTankerAction } from "@/app/admin/ops-actions";
+import AccountSelectField from "@/components/admin/AccountSelectField";
+import type { PaymentAccountOption } from "@/lib/payment-accounts";
 
 type VendorOption = { id: string; label: string };
 type WaterRow = {
@@ -11,6 +13,7 @@ type WaterRow = {
   amountLabel: string;
   vendorName: string;
   paymentStatus: string;
+  payerLabel: string | null;
   notes: string | null;
 };
 
@@ -26,9 +29,11 @@ function todayIsoDate(): string {
 export default function WaterPanel({
   vendors,
   rows,
+  accounts,
 }: {
   vendors: VendorOption[];
   rows: WaterRow[];
+  accounts: PaymentAccountOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -114,6 +119,16 @@ export default function WaterPanel({
               <option value="paid">Paid</option>
             </select>
           </label>
+          <div className="sm:col-span-2">
+            <AccountSelectField
+              accounts={accounts}
+              name="payer_account_id"
+              label="Paid by (account)"
+              hint="Who paid for this tanker — Joint, Kasi, Kanthu, or Pratyu."
+              allowEmpty
+              emptyLabel="Not specified"
+            />
+          </div>
           <label className="block sm:col-span-2">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
               Notes
@@ -159,6 +174,7 @@ export default function WaterPanel({
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
                   {row.vendorName} · {row.paymentStatus}
+                  {row.payerLabel ? ` · Paid by ${row.payerLabel}` : ""}
                 </p>
               </li>
             ))}

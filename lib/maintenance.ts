@@ -10,6 +10,8 @@ export type MaintenanceRequest = {
   priority: string;
   cost: number | null;
   category: string | null;
+  payerAccountId: string | null;
+  payerAccountLabel: string | null;
   createdAt: string;
 };
 
@@ -35,8 +37,10 @@ export async function listMaintenanceRequests(
       priority,
       cost,
       category,
+      payer_account_id,
       created_at,
-      flats ( flat_number )
+      flats ( flat_number ),
+      payment_accounts ( label )
     `
     )
     .order("created_at", { ascending: false })
@@ -51,6 +55,9 @@ export async function listMaintenanceRequests(
 
   return data.map((row) => {
     const flat = Array.isArray(row.flats) ? row.flats[0] : row.flats;
+    const payerAccount = Array.isArray(row.payment_accounts)
+      ? row.payment_accounts[0]
+      : row.payment_accounts;
     return {
       id: row.id,
       flatId: row.flat_id,
@@ -61,6 +68,8 @@ export async function listMaintenanceRequests(
       priority: row.priority?.trim() || "normal",
       cost: num(row.cost),
       category: row.category,
+      payerAccountId: row.payer_account_id,
+      payerAccountLabel: payerAccount?.label?.trim() || null,
       createdAt: row.created_at,
     };
   });
@@ -76,6 +85,7 @@ export async function createMaintenanceRequest(
     priority?: string;
     cost?: number | null;
     category?: string | null;
+    payerAccountId?: string | null;
   }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.flatId) return { ok: false, error: "Select a flat." };
@@ -91,6 +101,7 @@ export async function createMaintenanceRequest(
       priority: input.priority?.trim() || "normal",
       cost: input.cost ?? null,
       category: input.category?.trim() || null,
+      payer_account_id: input.payerAccountId || null,
     })
     .select("id")
     .single();

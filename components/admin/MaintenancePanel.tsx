@@ -6,6 +6,8 @@ import {
   createMaintenanceAction,
   updateMaintenanceStatusAction,
 } from "@/app/admin/maintenance/actions";
+import AccountSelectField from "@/components/admin/AccountSelectField";
+import type { PaymentAccountOption } from "@/lib/payment-accounts";
 
 type FlatOption = { id: string; label: string };
 
@@ -18,14 +20,17 @@ type RequestRow = {
   priority: string;
   costLabel: string;
   category: string | null;
+  payerLabel: string | null;
 };
 
 export default function MaintenancePanel({
   flats,
   requests,
+  accounts,
 }: {
   flats: FlatOption[];
   requests: RequestRow[];
+  accounts: PaymentAccountOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -140,6 +145,16 @@ export default function MaintenancePanel({
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
             />
           </label>
+          <div className="sm:col-span-2">
+            <AccountSelectField
+              accounts={accounts}
+              name="payer_account_id"
+              label="Paid by (account)"
+              hint="Who is paying for this repair — Joint, Kasi, Kanthu, or Pratyu."
+              allowEmpty
+              emptyLabel="Not specified"
+            />
+          </div>
           <label className="block sm:col-span-2">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
               Description
@@ -186,6 +201,7 @@ export default function MaintenancePanel({
                     <p className="mt-1 text-sm text-slate-500">
                       Flat {row.flatNumber} · {row.priority}
                       {row.category ? ` · ${row.category}` : ""}
+                      {row.payerLabel ? ` · Paid by ${row.payerLabel}` : ""}
                     </p>
                     {row.description ? (
                       <p className="mt-2 text-sm text-slate-600">

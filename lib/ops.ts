@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { endTenancy, transferTenancy } from "@/lib/tenancies";
 
 export type Vendor = {
   id: string;
@@ -16,15 +17,22 @@ export type WaterTanker = {
   vendorId: string | null;
   vendorName: string | null;
   paymentStatus: string | null;
+  payerAccountId: string | null;
+  payerAccountLabel: string | null;
   notes: string | null;
   createdAt: string;
 };
+
+export type MoveRequestType = "vacate" | "transfer";
 
 export type VacateRequest = {
   id: string;
   tenancyId: string;
   status: string;
+  requestType: MoveRequestType;
   reason: string | null;
+  preferredFlatNumber: string | null;
+  targetFlatId: string | null;
   flatNumber: string | null;
   tenantName: string | null;
 };
@@ -91,8 +99,10 @@ export async function listWaterTankers(
       vendor_id,
       notes,
       payment_status,
+      payer_account_id,
       created_at,
-      vendors ( name )
+      vendors ( name ),
+      payment_accounts ( label )
     `
     )
     .order("delivery_date", { ascending: false })
@@ -102,6 +112,9 @@ export async function listWaterTankers(
 
   return data.map((row) => {
     const vendor = Array.isArray(row.vendors) ? row.vendors[0] : row.vendors;
+    const payerAccount = Array.isArray(row.payment_accounts)
+      ? row.payment_accounts[0]
+      : row.payment_accounts;
     const amount =
       row.amount == null ? null : Number(row.amount);
     return {
@@ -111,6 +124,8 @@ export async function listWaterTankers(
       vendorId: row.vendor_id,
       vendorName: vendor?.name?.trim() || null,
       paymentStatus: row.payment_status,
+      payerAccountId: row.payer_account_id,
+      payerAccountLabel: payerAccount?.label?.trim() || null,
       notes: row.notes,
       createdAt: row.created_at,
     };
@@ -124,6 +139,7 @@ export async function createWaterTanker(
     amount?: number | null;
     vendorId?: string | null;
     paymentStatus?: string | null;
+    payerAccountId?: string | null;
     notes?: string | null;
   }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
@@ -138,6 +154,7 @@ export async function createWaterTanker(
       amount: input.amount ?? null,
       vendor_id: input.vendorId || null,
       payment_status: input.paymentStatus?.trim() || "pending",
+      payer_account_id: input.payerAccountId || null,
       notes: input.notes?.trim() || null,
     })
     .select("id")
@@ -147,6 +164,21 @@ export async function createWaterTanker(
     return { ok: false, error: error?.message ?? "Could not save tanker order." };
   }
   return { ok: true, id: data.id };
+}
+
+export async function updateWaterTankerPaymentStatus(
+  supabase: SupabaseClient,
+  id: string,
+  paymentStatus: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!id.trim()) return { ok: false, error: "Missing tanker id." };
+  const status = paymentStatus.trim() || "pending";
+  const { error } = await supabase
+    .from("water_tankers")
+    .update({ payment_status: status })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 export async function listVacateRequests(
@@ -161,6 +193,9 @@ export async function listVacateRequests(
       tenancy_id,
       status,
       reason,
+      request_type,
+      preferred_flat_number,
+      target_flat_id,
       tenancies (
         tenants ( full_name ),
         flats ( flat_number )
@@ -173,7 +208,30 @@ export async function listVacateRequests(
     query = query.eq("tenancy_id", options.tenancyId);
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (error) {
+    let fallbackQuery = supabase
+      .from("vacate_requests")
+      .select(
+        `
+        id,
+        tenancy_id,
+        status,
+        reason,
+        tenancies (
+          tenants ( full_name ),
+          flats ( flat_number )
+        )
+      `
+      )
+      .limit(options?.limit ?? 50);
+    if (options?.tenancyId) {
+      fallbackQuery = fallbackQuery.eq("tenancy_id", options.tenancyId);
+    }
+    const fallback = await fallbackQuery;
+    data = fallback.data as typeof data;
+    error = fallback.error;
+  }
   if (error || !data) return [];
 
   return data.map((row) => {
@@ -191,11 +249,22 @@ export async function listVacateRequests(
         : tenancy.flats
       : null;
 
+    const extra = row as typeof row & {
+      request_type?: string | null;
+      preferred_flat_number?: string | null;
+      target_flat_id?: string | null;
+    };
+    const requestType: MoveRequestType =
+      extra.request_type === "transfer" ? "transfer" : "vacate";
+
     return {
       id: row.id,
       tenancyId: row.tenancy_id,
       status: row.status?.trim() || "pending",
+      requestType,
       reason: row.reason,
+      preferredFlatNumber: extra.preferred_flat_number?.trim() || null,
+      targetFlatId: extra.target_flat_id ?? null,
       flatNumber: flat?.flat_number?.trim() || null,
       tenantName: tenant?.full_name?.trim() || null,
     };
@@ -204,19 +273,54 @@ export async function listVacateRequests(
 
 export async function createVacateRequest(
   supabase: SupabaseClient,
-  input: { tenancyId: string; reason?: string | null }
+  input: {
+    tenancyId: string;
+    reason?: string | null;
+    requestType?: MoveRequestType;
+    preferredFlatNumber?: string | null;
+  }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.tenancyId) return { ok: false, error: "No active tenancy." };
 
-  const { data, error } = await supabase
+  const requestType: MoveRequestType =
+    input.requestType === "transfer" ? "transfer" : "vacate";
+
+  const payload: Record<string, unknown> = {
+    tenancy_id: input.tenancyId,
+    status: "pending",
+    reason: input.reason?.trim() || null,
+    request_type: requestType,
+    preferred_flat_number: input.preferredFlatNumber?.trim() || null,
+  };
+
+  let { data, error } = await supabase
     .from("vacate_requests")
-    .insert({
-      tenancy_id: input.tenancyId,
-      status: "pending",
-      reason: input.reason?.trim() || null,
-    })
+    .insert(payload)
     .select("id")
     .single();
+
+  if (error && /column .* does not exist/i.test(error.message)) {
+    const retry = await supabase
+      .from("vacate_requests")
+      .insert({
+        tenancy_id: input.tenancyId,
+        status: "pending",
+        reason:
+          [
+            requestType === "transfer" ? "Transfer within" : "Move out",
+            input.preferredFlatNumber?.trim()
+              ? `preferred flat: ${input.preferredFlatNumber.trim()}`
+              : null,
+            input.reason?.trim(),
+          ]
+            .filter(Boolean)
+            .join(" — ") || null,
+      })
+      .select("id")
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error || !data) {
     return { ok: false, error: error?.message ?? "Could not submit vacate request." };
@@ -234,6 +338,96 @@ export async function updateVacateStatus(
     .update({ status: status.trim() })
     .eq("id", id);
 
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function completeMoveRequest(
+  supabase: SupabaseClient,
+  input: {
+    id: string;
+    targetFlatId?: string | null;
+    monthlyRent?: number | null;
+    effectiveDate?: string | null;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = input.id.trim();
+  if (!id) return { ok: false, error: "Missing request." };
+
+  let { data: row, error: loadError } = await supabase
+    .from("vacate_requests")
+    .select("id,tenancy_id,status,request_type")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (loadError && /column .* does not exist/i.test(loadError.message)) {
+    const fallback = await supabase
+      .from("vacate_requests")
+      .select("id,tenancy_id,status")
+      .eq("id", id)
+      .maybeSingle();
+    row = fallback.data
+      ? { ...fallback.data, request_type: "vacate" }
+      : fallback.data;
+    loadError = fallback.error;
+  }
+
+  if (loadError || !row) {
+    return { ok: false, error: loadError?.message ?? "Request not found." };
+  }
+  if (row.status === "completed") {
+    return { ok: false, error: "This request is already completed." };
+  }
+  if (row.status === "rejected") {
+    return { ok: false, error: "Rejected requests cannot be completed." };
+  }
+
+  const requestType: MoveRequestType =
+    row.request_type === "transfer" ? "transfer" : "vacate";
+
+  if (requestType === "transfer") {
+    const targetFlatId = input.targetFlatId?.trim() || "";
+    if (!targetFlatId) {
+      return { ok: false, error: "Select the vacant flat for this transfer." };
+    }
+    const moved = await transferTenancy(supabase, {
+      fromTenancyId: row.tenancy_id,
+      toFlatId: targetFlatId,
+      startDate: input.effectiveDate,
+      monthlyRent: input.monthlyRent,
+    });
+    if (!moved.ok) return moved;
+
+    const { error } = await supabase
+      .from("vacate_requests")
+      .update({
+        status: "completed",
+        target_flat_id: targetFlatId,
+      })
+      .eq("id", id);
+    if (error && /column .* does not exist/i.test(error.message)) {
+      const retry = await supabase
+        .from("vacate_requests")
+        .update({ status: "completed" })
+        .eq("id", id);
+      if (retry.error) return { ok: false, error: retry.error.message };
+      return { ok: true };
+    }
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }
+
+  const ended = await endTenancy(supabase, {
+    tenancyId: row.tenancy_id,
+    endDate: input.effectiveDate,
+    status: "ended",
+  });
+  if (!ended.ok) return ended;
+
+  const { error } = await supabase
+    .from("vacate_requests")
+    .update({ status: "completed" })
+    .eq("id", id);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }

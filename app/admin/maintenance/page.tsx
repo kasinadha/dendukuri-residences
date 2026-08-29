@@ -3,13 +3,15 @@ import MaintenancePanel from "@/components/admin/MaintenancePanel";
 import { requireAdmin } from "@/lib/auth";
 import { listFlatsForSelect } from "@/lib/electricity";
 import { listMaintenanceRequests } from "@/lib/maintenance";
+import { listPaymentAccounts, toPaymentAccountOptions } from "@/lib/payment-accounts";
 import { formatInr } from "@/lib/receipts";
 
 export default async function MaintenancePage() {
   const { supabase } = await requireAdmin();
-  const [flats, requests] = await Promise.all([
+  const [flats, requests, accounts] = await Promise.all([
     listFlatsForSelect(supabase),
     listMaintenanceRequests(supabase),
+    listPaymentAccounts(supabase),
   ]);
 
   return (
@@ -26,6 +28,7 @@ export default async function MaintenancePage() {
 
       <MaintenancePanel
         flats={flats}
+        accounts={toPaymentAccountOptions(accounts)}
         requests={requests.map((row) => ({
           id: row.id,
           flatNumber: row.flatNumber,
@@ -35,6 +38,7 @@ export default async function MaintenancePage() {
           priority: row.priority,
           costLabel: row.cost != null ? formatInr(row.cost) : "—",
           category: row.category,
+          payerLabel: row.payerAccountLabel,
         }))}
       />
     </AdminLayout>

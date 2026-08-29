@@ -1,17 +1,29 @@
 import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
+import OwnerDuesRemindersPanel from "@/components/admin/OwnerDuesRemindersPanel";
 import PaymentSubmissionsPanel from "@/components/admin/PaymentSubmissionsPanel";
 import RecordPaymentForm, {
   type TenancyOption,
 } from "@/components/admin/RecordPaymentForm";
+import UnpaidRentRemindersPanel from "@/components/admin/UnpaidRentRemindersPanel";
 import { requireAdmin } from "@/lib/auth";
+import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
+import {
+  listPaymentAccounts,
+  resolvePaymentAccountFromUpi,
+  toPaymentAccountOptions,
+} from "@/lib/payment-accounts";
 import { listPaymentSubmissions } from "@/lib/payment-submissions";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   formatDisplayDate,
   formatInr,
 } from "@/lib/receipts";
+import {
+  listOwnerDueReminders,
+  listUnpaidRentReminders,
+} from "@/lib/reminders";
 import {
   getRentMonthSummary,
   listPaymentHistory,
@@ -61,10 +73,28 @@ export default async function PaymentsPage({ searchParams }: Props) {
       status,
       monthly_rent,
       tenants ( full_name ),
-      flats ( flat_number )
+      flats ( flat_number, upi_id, upi_qr_url, payment_account_id )
     `
     )
     .order("created_at", { ascending: false });
+
+  const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccounts] =
+    await Promise.all([
+      getRentMonthSummary(supabase, month),
+      listPaymentHistory(supabase, {
+        month,
+        flat,
+        tenant,
+        status,
+        limit: 80,
+      }),
+      listPaymentSubmissions(supabase, { status: "pending", limit: 40 }),
+      listUnpaidRentReminders(supabase, month),
+      listOwnerDueReminders(supabase),
+      listPaymentAccounts(supabase),
+    ]);
+
+  const accountOptions = toPaymentAccountOptions(paymentAccounts);
 
   const tenancyOptions: TenancyOption[] = (tenancyRows ?? [])
     .filter((row) => isActiveTenancyStatus(row.status))
@@ -73,26 +103,21 @@ export default async function PaymentsPage({ searchParams }: Props) {
       const flatRow = unwrapOne(row.flats);
       const rent =
         row.monthly_rent == null ? null : Number(row.monthly_rent);
+      const suggested = resolvePaymentAccountFromUpi(paymentAccounts, {
+        upiId: flatRow?.upi_id,
+        upiQrUrl: flatRow?.upi_qr_url,
+        buildingWing: buildingWingFromFlatNumber(flatRow?.flat_number),
+      });
       return {
         id: row.id,
         flatNumber: flatRow?.flat_number?.trim() || "—",
         tenantName: tenantRow?.full_name?.trim() || "Tenant",
         monthlyRent: Number.isFinite(rent) ? rent : null,
         label: `Flat ${flatRow?.flat_number ?? "?"} — ${tenantRow?.full_name ?? "Tenant"}`,
+        suggestedReceiverAccountId:
+          flatRow?.payment_account_id ?? suggested?.id ?? null,
       };
     });
-
-  const [monthSummary, history, pendingSubmissions] = await Promise.all([
-    getRentMonthSummary(supabase, month),
-    listPaymentHistory(supabase, {
-      month,
-      flat,
-      tenant,
-      status,
-      limit: 80,
-    }),
-    listPaymentSubmissions(supabase, { status: "pending", limit: 40 }),
-  ]);
 
   const filterMonth = month ?? monthSummary.billingMonthKey;
 
@@ -162,12 +187,27 @@ export default async function PaymentsPage({ searchParams }: Props) {
         ))}
       </div>
 
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <UnpaidRentRemindersPanel
+          billingMonthKey={unpaidReminders.billingMonthKey}
+          billingMonthLabel={unpaidReminders.billingMonthLabel}
+          rows={unpaidReminders.rows}
+        />
+        <OwnerDuesRemindersPanel items={ownerDues} />
+      </div>
+
       <div className="mt-8">
-        <PaymentSubmissionsPanel submissions={pendingSubmissions} />
+        <PaymentSubmissionsPanel
+          submissions={pendingSubmissions}
+          accounts={paymentAccounts}
+        />
       </div>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-        <RecordPaymentForm tenancies={tenancyOptions} />
+        <RecordPaymentForm
+          tenancies={tenancyOptions}
+          accounts={accountOptions}
+        />
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-5 sm:p-6">

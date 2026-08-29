@@ -10,7 +10,9 @@ import {
 import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
 import { listMaintenanceRequests } from "@/lib/maintenance";
+import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr, listReceiptViews } from "@/lib/receipts";
+import { getTenantMonthDue } from "@/lib/reminders";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 export default async function TenantHomePage() {
@@ -25,8 +27,16 @@ export default async function TenantHomePage() {
   const maintenance = ctx?.flatId
     ? await listMaintenanceRequests(supabase, { flatId: ctx.flatId, limit: 3 })
     : [];
+  const monthDue = ctx?.tenancyId
+    ? await getTenantMonthDue(supabase, ctx.tenancyId)
+    : null;
 
   const latestReceipt = receipts[0] ?? null;
+  const rentUnpaid =
+    monthDue &&
+    monthDue.outstanding > 0 &&
+    monthDue.status !== "paid" &&
+    monthDue.status !== "waived";
 
   return (
     <div>
@@ -44,43 +54,75 @@ export default async function TenantHomePage() {
           `tenants.profile_id` to your auth user id.
         </p>
       ) : (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">Flat</p>
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {ctx.flatNumber ?? "—"}
+        <>
+          {rentUnpaid && monthDue ? (
+            <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:flex sm:items-center sm:justify-between sm:gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-amber-800">
+                  Rent due · {monthDue.billingMonthKey}
+                </p>
+                <p className="mt-1 text-lg font-bold text-amber-950">
+                  Outstanding {formatInr(monthDue.outstanding)} ·{" "}
+                  {paymentStatusLabel(monthDue.status)}
+                </p>
+                <p className="mt-1 text-sm text-amber-900">
+                  Due {formatInr(monthDue.amountDue)} · Paid{" "}
+                  {formatInr(monthDue.amountPaid)}
+                </p>
+              </div>
+              <Link
+                href="/tenant/pay"
+                className="mt-4 inline-flex rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white sm:mt-0"
+              >
+                Pay now
+              </Link>
+            </div>
+          ) : monthDue &&
+            (monthDue.status === "paid" || monthDue.status === "waived") ? (
+            <p className="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
+              Rent for {monthDue.billingMonthKey} is{" "}
+              {paymentStatusLabel(monthDue.status).toLowerCase()}.
             </p>
-            <p className="mt-2 text-xs capitalize text-slate-500">
-              {ctx.tenancyStatus ?? "no tenancy"}
-            </p>
+          ) : null}
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Flat</p>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {ctx.flatNumber ?? "—"}
+              </p>
+              <p className="mt-2 text-xs capitalize text-slate-500">
+                {ctx.tenancyStatus ?? "no tenancy"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Monthly rent</p>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {ctx.monthlyRent != null ? formatInr(ctx.monthlyRent) : "—"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Latest receipt</p>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {latestReceipt ? formatInr(latestReceipt.rentAmount) : "—"}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                {latestReceipt?.billingMonth ?? "None yet"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Open maintenance</p>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {
+                  maintenance.filter(
+                    (m) =>
+                      m.status === "open" || m.status === "in_progress"
+                  ).length
+                }
+              </p>
+            </div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">Monthly rent</p>
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {ctx.monthlyRent != null ? formatInr(ctx.monthlyRent) : "—"}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">Latest receipt</p>
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {latestReceipt ? formatInr(latestReceipt.rentAmount) : "—"}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">
-              {latestReceipt?.billingMonth ?? "None yet"}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">Open maintenance</p>
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {
-                maintenance.filter(
-                  (m) =>
-                    m.status === "open" || m.status === "in_progress"
-                ).length
-              }
-            </p>
-          </div>
-        </div>
+        </>
       )}
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
@@ -112,8 +154,8 @@ export default async function TenantHomePage() {
           {
             href: "/tenant/vacate",
             icon: DoorOpen,
-            title: "Vacate request",
-            detail: "Submit notice to leave",
+            title: "Move out or transfer",
+            detail: "Leave the property, or shift to another flat",
           },
         ].map(({ href, icon: Icon, title, detail }) => (
           <Link

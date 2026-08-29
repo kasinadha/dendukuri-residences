@@ -1,4 +1,6 @@
 import AdminLayout from "@/components/admin/AdminLayout";
+import OwnerDuesRemindersPanel from "@/components/admin/OwnerDuesRemindersPanel";
+import UnpaidRentRemindersPanel from "@/components/admin/UnpaidRentRemindersPanel";
 import {
   Building2,
   Users,
@@ -13,6 +15,10 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin, summarizeFlats } from "@/lib/flats";
 import { formatInr } from "@/lib/receipts";
+import {
+  listOwnerDueReminders,
+  listUnpaidRentReminders,
+} from "@/lib/reminders";
 import { getRentMonthSummary } from "@/lib/rent-month";
 
 function currentMonthLabel() {
@@ -25,9 +31,11 @@ function currentMonthLabel() {
 
 export default async function AdminDashboard() {
   const { supabase } = await requireAdmin();
-  const [flats, rentMonth] = await Promise.all([
+  const [flats, rentMonth, unpaidReminders, ownerDues] = await Promise.all([
     listFlatsForAdmin(supabase),
     getRentMonthSummary(supabase),
+    listUnpaidRentReminders(supabase),
+    listOwnerDueReminders(supabase),
   ]);
 
   const summary = summarizeFlats(flats);
@@ -105,6 +113,15 @@ export default async function AdminDashboard() {
             <p className="mt-4 text-xs text-slate-500">{detail}</p>
           </div>
         ))}
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <UnpaidRentRemindersPanel
+          billingMonthKey={unpaidReminders.billingMonthKey}
+          billingMonthLabel={unpaidReminders.billingMonthLabel}
+          rows={unpaidReminders.rows}
+        />
+        <OwnerDuesRemindersPanel items={ownerDues} />
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr]">

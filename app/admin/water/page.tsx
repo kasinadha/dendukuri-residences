@@ -2,13 +2,15 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import WaterPanel from "@/components/admin/WaterPanel";
 import { requireAdmin } from "@/lib/auth";
 import { listVendors, listWaterTankers } from "@/lib/ops";
+import { listPaymentAccounts, toPaymentAccountOptions } from "@/lib/payment-accounts";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default async function WaterPage() {
   const { supabase } = await requireAdmin();
-  const [vendors, tankers] = await Promise.all([
+  const [vendors, tankers, accounts] = await Promise.all([
     listVendors(supabase),
     listWaterTankers(supabase),
+    listPaymentAccounts(supabase),
   ]);
 
   return (
@@ -24,12 +26,14 @@ export default async function WaterPage() {
       </div>
       <WaterPanel
         vendors={vendors.map((v) => ({ id: v.id, label: v.name }))}
+        accounts={toPaymentAccountOptions(accounts)}
         rows={tankers.map((row) => ({
           id: row.id,
           deliveryDate: formatDisplayDate(row.deliveryDate),
           amountLabel: row.amount != null ? formatInr(row.amount) : "—",
           vendorName: row.vendorName ?? "No vendor",
           paymentStatus: row.paymentStatus ?? "—",
+          payerLabel: row.payerAccountLabel,
           notes: row.notes,
         }))}
       />

@@ -36,6 +36,10 @@ In Supabase → Authentication → URL configuration, add:
 
 ### Link a tenant login
 
+**From admin (recommended):** Admin → Tenants → **Create login** — mobile + password. Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` / Vercel (server only, not `NEXT_PUBLIC_*`).
+
+**Manual (Supabase):**
+
 1. Create an Auth user (email + password) in Supabase Auth.
 2. Insert `profiles` with `role = tenant` and `is_active = true` for that Auth UUID.
 3. Set `tenants.profile_id` to that UUID so the portal resolves their flat/tenancy.
@@ -47,6 +51,7 @@ In Supabase → Authentication → URL configuration, add:
 2. Set environment variables (Production + Preview):
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY` (server only — tenant login creation from admin)
 3. Deploy. Update Supabase Auth Site URL / redirect allowlist to the Vercel domain.
 4. Confirm `/login` → admin dashboard and tenant routes work.
 
