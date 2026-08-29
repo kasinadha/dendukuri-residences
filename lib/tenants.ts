@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
+import {
+  buildTenantMonthlyCharges,
+  type TenantMonthlyCharges,
+} from "@/lib/tenant-charges";
+
+export type { TenantMonthlyCharges };
 
 export type TenantListItem = {
   id: string;
@@ -12,6 +18,7 @@ export type TenantListItem = {
   depositAmount: number | null;
   depositPaid: number | null;
   depositPaidDate: string | null;
+  monthlyCharges: TenantMonthlyCharges | null;
   tenancyStatus: string | null;
   hasActiveTenancy: boolean;
   tenancyId: string | null;
@@ -34,6 +41,7 @@ type FlatJoin = {
   flat_number: string | null;
   flat_type: string | null;
   status: string | null;
+  maintenance_amount: number | string | null;
 };
 
 type TenancyJoin = {
@@ -44,6 +52,11 @@ type TenancyJoin = {
   deposit_amount: number | string | null;
   deposit_paid: number | string | null;
   deposit_paid_date: string | null;
+  maintenance_charge: number | string | null;
+  car_parking_charge: number | string | null;
+  washing_machine_charge: number | string | null;
+  other_monthly_charge: number | string | null;
+  other_charges_notes: string | null;
   flats: FlatJoin | FlatJoin[] | null;
 };
 
@@ -94,6 +107,11 @@ export async function updateTenantTenancyTerms(
     depositAmount: number | null;
     depositPaid: number | null;
     depositPaidDate: string | null;
+    maintenanceCharge: number | null;
+    carParkingCharge: number | null;
+    washingMachineCharge: number | null;
+    otherMonthlyCharge: number | null;
+    otherChargesNotes: string | null;
     termsConfirmed: boolean;
   }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -101,7 +119,7 @@ export async function updateTenantTenancyTerms(
   if (!input.termsConfirmed) {
     return {
       ok: false,
-      error: "Confirm that rent and advance changes are intentional.",
+      error: "Confirm that tenancy term changes are intentional.",
     };
   }
 
@@ -123,18 +141,45 @@ export async function updateTenantTenancyTerms(
     }
   }
 
+  for (const [label, value] of [
+    ["Maintenance", input.maintenanceCharge],
+    ["Car parking", input.carParkingCharge],
+    ["Washing machine", input.washingMachineCharge],
+    ["Other charges", input.otherMonthlyCharge],
+  ] as const) {
+    if (value != null && (!Number.isFinite(value) || value < 0)) {
+      return { ok: false, error: `Enter a valid ${label.toLowerCase()} amount.` };
+    }
+  }
+
+  const payload: Record<string, unknown> = {
+    monthly_rent: input.monthlyRent,
+    deposit_amount: input.depositAmount,
+    security_deposit: input.depositAmount,
+    deposit_paid: input.depositPaid,
+    deposit_paid_date: input.depositPaidDate || null,
+    maintenance_charge: input.maintenanceCharge ?? 0,
+    car_parking_charge: input.carParkingCharge ?? 0,
+    washing_machine_charge: input.washingMachineCharge ?? 0,
+    other_monthly_charge: input.otherMonthlyCharge ?? 0,
+    other_charges_notes: input.otherChargesNotes?.trim() || null,
+  };
+
   const { error: tenancyError } = await supabase
     .from("tenancies")
-    .update({
-      monthly_rent: input.monthlyRent,
-      deposit_amount: input.depositAmount,
-      security_deposit: input.depositAmount,
-      deposit_paid: input.depositPaid,
-      deposit_paid_date: input.depositPaidDate || null,
-    })
+    .update(payload)
     .eq("id", input.tenancyId);
 
   if (tenancyError) {
+    if (/maintenance_charge|car_parking_charge|washing_machine_charge|other_monthly_charge/i.test(
+      tenancyError.message
+    )) {
+      return {
+        ok: false,
+        error:
+          "Monthly charge columns are missing. Run supabase/migrations/20260829_tenancy_monthly_charges.sql in Supabase.",
+      };
+    }
     return { ok: false, error: tenancyError.message };
   }
 
@@ -161,17 +206,52 @@ export async function listTenantsForAdmin(
         deposit_amount,
         deposit_paid,
         deposit_paid_date,
-        flats ( flat_number, flat_type, status )
+        maintenance_charge,
+        car_parking_charge,
+        washing_machine_charge,
+        other_monthly_charge,
+        other_charges_notes,
+        flats ( flat_number, flat_type, status, maintenance_amount )
       )
     `
     )
     .order("full_name", { ascending: true });
 
   if (error || !data) {
-    return [];
+    const { data: fallback } = await supabase
+      .from("tenants")
+      .select(
+        `
+        id,
+        full_name,
+        email,
+        phone,
+        profile_id,
+        tenancies (
+          id,
+          status,
+          monthly_rent,
+          security_deposit,
+          deposit_amount,
+          deposit_paid,
+          deposit_paid_date,
+          flats ( flat_number, flat_type, status, maintenance_amount )
+        )
+      `
+      )
+      .order("full_name", { ascending: true });
+    if (!fallback) return [];
+    return mapTenantRows(fallback as unknown as TenantRow[], false);
   }
 
-  return (data as unknown as TenantRow[]).map((row) => {
+  return mapTenantRows(data as unknown as TenantRow[], true);
+}
+
+function mapTenantRows(
+  data: TenantRow[],
+  hasChargeColumns: boolean
+): TenantListItem[] {
+  return data.map((row) => {
     const tenancies = Array.isArray(row.tenancies)
       ? row.tenancies
       : row.tenancies
@@ -193,6 +273,29 @@ export async function listTenantsForAdmin(
     const depositAmount =
       num(activeTenancy?.deposit_amount) ??
       num(activeTenancy?.security_deposit);
+    const hasActive = Boolean(
+      activeTenancy && isActiveTenancyStatus(activeTenancy.status)
+    );
+    const monthlyCharges = hasActive
+      ? buildTenantMonthlyCharges({
+          maintenanceCharge: hasChargeColumns
+            ? num(activeTenancy?.maintenance_charge)
+            : null,
+          carParkingCharge: hasChargeColumns
+            ? num(activeTenancy?.car_parking_charge)
+            : null,
+          washingMachineCharge: hasChargeColumns
+            ? num(activeTenancy?.washing_machine_charge)
+            : null,
+          otherMonthlyCharge: hasChargeColumns
+            ? num(activeTenancy?.other_monthly_charge)
+            : null,
+          otherChargesNotes: hasChargeColumns
+            ? activeTenancy?.other_charges_notes ?? null
+            : null,
+          flatMaintenanceFallback: num(flat?.maintenance_amount),
+        })
+      : null;
 
     return {
       id: row.id,
@@ -205,14 +308,11 @@ export async function listTenantsForAdmin(
       depositAmount,
       depositPaid: num(activeTenancy?.deposit_paid),
       depositPaidDate: activeTenancy?.deposit_paid_date ?? null,
+      monthlyCharges,
       tenancyStatus: activeTenancy?.status?.trim() || null,
-      hasActiveTenancy: Boolean(
-        activeTenancy && isActiveTenancyStatus(activeTenancy.status)
-      ),
+      hasActiveTenancy: hasActive,
       tenancyId:
-        activeTenancy && isActiveTenancyStatus(activeTenancy.status)
-          ? activeTenancy.id
-          : null,
+        activeTenancy && hasActive ? activeTenancy.id : null,
       profileId: row.profile_id ?? null,
       hasPortalLogin: Boolean(row.profile_id),
     };

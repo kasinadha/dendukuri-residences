@@ -6,12 +6,14 @@ import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
+import { listUnpaidRentReminders } from "@/lib/reminders";
 
 export default async function TenantsPage() {
   const { supabase } = await requireAdmin();
-  const [tenants, flats] = await Promise.all([
+  const [tenants, flats, unpaidDues] = await Promise.all([
     listTenantsForAdmin(supabase),
     listFlatsForAdmin(supabase),
+    listUnpaidRentReminders(supabase),
   ]);
   const activeCount = tenants.filter((t) => t.hasActiveTenancy).length;
   const vacantFlats = flats
@@ -30,10 +32,9 @@ export default async function TenantsPage() {
             Tenants
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Tenant profiles with linked flat, rent, and advance/deposit. Contact
-            details are freely editable; rent and advance are locked and need
-            confirmation to change. Portal logins, transfer, and vacate are
-            separate.
+            Tenant profiles with linked flat, rent, monthly charges, and
+            advance/deposit. Contact details are freely editable; rent, charges,
+            and advance are locked and need confirmation to change.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -46,6 +47,24 @@ export default async function TenantsPage() {
         </div>
       </div>
 
+      {unpaidDues.rows.length > 0 ? (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
+          <p className="font-semibold text-amber-950">
+            {unpaidDues.rows.length} tenant
+            {unpaidDues.rows.length === 1 ? "" : "s"} with unpaid monthly dues
+            · {unpaidDues.billingMonthLabel}
+          </p>
+          <p className="mt-1 text-sm text-amber-900">
+            Includes rent, maintenance, parking, washer, and other monthly
+            charges. Send reminders from{" "}
+            <a href="/admin/payments" className="font-semibold underline">
+              Payments
+            </a>
+            .
+          </p>
+        </div>
+      ) : null}
+
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {tenants.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
@@ -53,12 +72,13 @@ export default async function TenantsPage() {
           </p>
         ) : (
           <>
-            <div className="hidden border-b border-slate-100 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[1fr_0.95fr_0.6fr_0.55fr_0.65fr_0.85fr_0.6fr_0.9fr_0.85fr_1fr] lg:gap-3 lg:px-6">
+            <div className="hidden border-b border-slate-100 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[0.9fr_0.85fr_0.5fr_0.45fr_0.55fr_0.75fr_0.75fr_0.5fr_0.8fr_0.75fr_0.9fr] lg:gap-2 lg:px-6">
               <span>Name</span>
               <span>Contact</span>
               <span>Flat</span>
               <span>Type</span>
               <span>Rent</span>
+              <span>Charges</span>
               <span>Advance</span>
               <span>Status</span>
               <span>Portal login</span>
@@ -69,7 +89,7 @@ export default async function TenantsPage() {
               {tenants.map((tenant) => (
                 <li
                   key={tenant.id}
-                  className="grid gap-2 px-5 py-4 lg:grid-cols-[1fr_0.95fr_0.6fr_0.55fr_0.65fr_0.85fr_0.6fr_0.9fr_0.85fr_1fr] lg:items-start lg:gap-3 lg:px-6"
+                  className="grid gap-2 px-5 py-4 lg:grid-cols-[0.9fr_0.85fr_0.5fr_0.45fr_0.55fr_0.75fr_0.75fr_0.5fr_0.8fr_0.75fr_0.9fr] lg:items-start lg:gap-2 lg:px-6"
                 >
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
@@ -115,6 +135,42 @@ export default async function TenantsPage() {
                         ? formatInr(tenant.monthlyRent)
                         : "—"}
                     </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
+                      Charges
+                    </p>
+                    {tenant.monthlyCharges ? (
+                      <>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {formatInr(tenant.monthlyCharges.totalMonthlyCharges)}
+                          <span className="font-normal text-slate-500">
+                            {" "}
+                            /mo
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          Maint {formatInr(tenant.monthlyCharges.maintenanceCharge)}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          Park {formatInr(tenant.monthlyCharges.carParkingCharge)}
+                          {" · "}Washer{" "}
+                          {formatInr(tenant.monthlyCharges.washingMachineCharge)}
+                        </p>
+                        {tenant.monthlyCharges.otherMonthlyCharge > 0 ||
+                        tenant.monthlyCharges.otherChargesNotes ? (
+                          <p className="text-xs text-slate-600">
+                            Other{" "}
+                            {formatInr(tenant.monthlyCharges.otherMonthlyCharge)}
+                            {tenant.monthlyCharges.otherChargesNotes
+                              ? ` · ${tenant.monthlyCharges.otherChargesNotes}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-500">—</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
@@ -209,6 +265,7 @@ export default async function TenantsPage() {
                       depositAmount={tenant.depositAmount}
                       depositPaid={tenant.depositPaid}
                       depositPaidDate={tenant.depositPaidDate}
+                      monthlyCharges={tenant.monthlyCharges}
                       tenancyId={tenant.tenancyId}
                       hasActiveTenancy={tenant.hasActiveTenancy}
                     />

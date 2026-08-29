@@ -1,4 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isActiveTenancyStatus } from "@/lib/occupancy";
+import {
+  calculateCommonAreaUnits,
+  calculateCommonSharePerFlat,
+  calculateFlatElectricityBill,
+  DEFAULT_ELECTRICITY_BILLING_CONFIG,
+  type ElectricityBillingConfig,
+  type FlatElectricityBillBreakdown,
+} from "@/lib/electricity-billing";
 
 export type FlatOption = { id: string; label: string };
 
@@ -10,14 +19,52 @@ export type ElectricityReading = {
   previousReading: number;
   currentReading: number;
   units: number;
+  commonShareUnits: number | null;
+  sanctionedKw: number | null;
+  energyCharge: number | null;
+  basicCharge: number | null;
+  serviceChargeAmount: number | null;
   billAmount: number | null;
   status: string;
   notes: string | null;
+  billingMonth: string | null;
+};
+
+export type OccupiedFlatForBilling = {
+  flatId: string;
+  flatNumber: string;
+  tenantName: string;
+  previousReading: number;
+  sanctionedKw: number;
+};
+
+export type ElectricityBillingRunSummary = {
+  id: string;
+  billingMonth: string;
+  readingDate: string;
+  buildingUnits: number;
+  commonAreaUnits: number;
+  occupiedFlatsCount: number;
+  ratePerUnit: number;
+  totalBilled: number;
 };
 
 function num(value: unknown): number {
   const n = typeof value === "string" ? Number(value) : Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
+function currentMonthKey(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+  }).format(now);
 }
 
 export async function listFlatsForSelect(
@@ -34,6 +81,63 @@ export async function listFlatsForSelect(
   }));
 }
 
+export async function listOccupiedFlatsForBilling(
+  supabase: SupabaseClient
+): Promise<OccupiedFlatForBilling[]> {
+  const { data } = await supabase
+    .from("tenancies")
+    .select(
+      `
+      id,
+      status,
+      flats ( id, flat_number ),
+      tenants ( full_name )
+    `
+    );
+
+  const occupied = (data ?? []).filter((row) =>
+    isActiveTenancyStatus(row.status)
+  );
+
+  const results: OccupiedFlatForBilling[] = [];
+  for (const row of occupied) {
+    const flat = unwrapOne(row.flats);
+    const tenant = unwrapOne(row.tenants);
+    if (!flat?.id) continue;
+
+    const last = await getLastReadingForFlat(supabase, flat.id);
+    results.push({
+      flatId: flat.id,
+      flatNumber: flat.flat_number?.trim() || "—",
+      tenantName: tenant?.full_name?.trim() || "Tenant",
+      previousReading: last?.currentReading ?? 0,
+      sanctionedKw: 2,
+    });
+  }
+
+  results.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber));
+  return results;
+}
+
+export async function getLastReadingForFlat(
+  supabase: SupabaseClient,
+  flatId: string
+): Promise<{ currentReading: number; readingDate: string } | null> {
+  const { data } = await supabase
+    .from("electricity_readings")
+    .select("current_reading, reading_date")
+    .eq("flat_id", flatId)
+    .order("reading_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    currentReading: num(data.current_reading),
+    readingDate: data.reading_date,
+  };
+}
+
 export async function listElectricityReadings(
   supabase: SupabaseClient,
   options?: { flatId?: string; limit?: number }
@@ -47,10 +151,18 @@ export async function listElectricityReadings(
       reading_date,
       previous_reading,
       current_reading,
+      flat_units,
+      common_share_units,
+      sanctioned_kw,
+      energy_charge,
+      basic_charge,
+      service_charge_amount,
       bill_amount,
       status,
       notes,
-      flats ( flat_number )
+      billing_run_id,
+      flats ( flat_number ),
+      electricity_billing_runs ( billing_month )
     `
     )
     .order("reading_date", { ascending: false })
@@ -63,26 +175,292 @@ export async function listElectricityReadings(
   const { data, error } = await query;
   if (error || !data) return [];
 
-  return data.map((row) => {
-    const flat = Array.isArray(row.flats) ? row.flats[0] : row.flats;
-    const previous = num(row.previous_reading);
-    const current = num(row.current_reading);
-    const bill =
-      row.bill_amount == null ? null : num(row.bill_amount);
+  return data.map((row) => mapReadingRow(row));
+}
 
+function mapReadingRow(row: Record<string, unknown>): ElectricityReading {
+  const flat = unwrapOne(
+    row.flats as { flat_number: string } | { flat_number: string }[] | null
+  );
+  const run = unwrapOne(
+    row.electricity_billing_runs as
+      | { billing_month: string }
+      | { billing_month: string }[]
+      | null
+  );
+  const previous = num(row.previous_reading);
+  const current = num(row.current_reading);
+  const flatUnits = row.flat_units == null ? null : num(row.flat_units);
+  const units = flatUnits ?? Math.max(current - previous, 0);
+
+  return {
+    id: String(row.id),
+    flatId: String(row.flat_id),
+    flatNumber: flat?.flat_number?.trim() || "—",
+    readingDate: String(row.reading_date),
+    previousReading: previous,
+    currentReading: current,
+    units,
+    commonShareUnits:
+      row.common_share_units == null ? null : num(row.common_share_units),
+    sanctionedKw: row.sanctioned_kw == null ? null : num(row.sanctioned_kw),
+    energyCharge: row.energy_charge == null ? null : num(row.energy_charge),
+    basicCharge: row.basic_charge == null ? null : num(row.basic_charge),
+    serviceChargeAmount:
+      row.service_charge_amount == null
+        ? null
+        : num(row.service_charge_amount),
+    billAmount: row.bill_amount == null ? null : num(row.bill_amount),
+    status: String(row.status ?? "recorded").trim() || "recorded",
+    notes: (row.notes as string | null) ?? null,
+    billingMonth: run?.billing_month ?? null,
+  };
+}
+
+export async function listElectricityBillingRuns(
+  supabase: SupabaseClient,
+  limit = 12
+): Promise<ElectricityBillingRunSummary[]> {
+  const { data, error } = await supabase
+    .from("electricity_billing_runs")
+    .select(
+      `
+      id,
+      billing_month,
+      reading_date,
+      building_previous_reading,
+      building_current_reading,
+      common_area_units,
+      occupied_flats_count,
+      rate_per_unit,
+      electricity_readings ( bill_amount )
+    `
+    )
+    .order("reading_date", { ascending: false })
+    .limit(limit);
+
+  if (error || !data) return [];
+
+  return data.map((row) => {
+    const readings = Array.isArray(row.electricity_readings)
+      ? row.electricity_readings
+      : row.electricity_readings
+        ? [row.electricity_readings]
+        : [];
+    const totalBilled = readings.reduce(
+      (sum, r) => sum + num(r.bill_amount),
+      0
+    );
     return {
       id: row.id,
-      flatId: row.flat_id,
-      flatNumber: flat?.flat_number?.trim() || "—",
+      billingMonth: row.billing_month,
       readingDate: row.reading_date,
-      previousReading: previous,
-      currentReading: current,
-      units: Math.max(current - previous, 0),
-      billAmount: bill,
-      status: row.status?.trim() || "recorded",
-      notes: row.notes,
+      buildingUnits: Math.max(
+        0,
+        num(row.building_current_reading) - num(row.building_previous_reading)
+      ),
+      commonAreaUnits: num(row.common_area_units),
+      occupiedFlatsCount: num(row.occupied_flats_count),
+      ratePerUnit: num(row.rate_per_unit),
+      totalBilled,
     };
   });
+}
+
+export function previewElectricityBills(input: {
+  buildingPreviousReading: number;
+  buildingCurrentReading: number;
+  ratePerUnit?: number;
+  basicChargePerKw?: number;
+  serviceChargePercent?: number;
+  flats: Array<{
+    flatId: string;
+    previousReading: number;
+    currentReading: number;
+    sanctionedKw?: number;
+  }>;
+}): {
+  config: ElectricityBillingConfig;
+  buildingUnits: number;
+  commonAreaUnits: number;
+  commonSharePerFlat: number;
+  flats: Array<{
+    flatId: string;
+    flatUnits: number;
+    breakdown: FlatElectricityBillBreakdown;
+  }>;
+} {
+  const config: ElectricityBillingConfig = {
+    ratePerUnit: input.ratePerUnit ?? DEFAULT_ELECTRICITY_BILLING_CONFIG.ratePerUnit,
+    basicChargePerKw:
+      input.basicChargePerKw ??
+      DEFAULT_ELECTRICITY_BILLING_CONFIG.basicChargePerKw,
+    serviceChargePercent:
+      input.serviceChargePercent ??
+      DEFAULT_ELECTRICITY_BILLING_CONFIG.serviceChargePercent,
+    defaultFlatSanctionedKw:
+      DEFAULT_ELECTRICITY_BILLING_CONFIG.defaultFlatSanctionedKw,
+  };
+
+  const buildingUnits = Math.max(
+    0,
+    input.buildingCurrentReading - input.buildingPreviousReading
+  );
+
+  const flatRows = input.flats.map((flat) => ({
+    flatId: flat.flatId,
+    flatUnits: Math.max(0, flat.currentReading - flat.previousReading),
+    sanctionedKw: flat.sanctionedKw ?? 2,
+  }));
+
+  const totalFlatUnits = flatRows.reduce((sum, row) => sum + row.flatUnits, 0);
+  const commonAreaUnits = calculateCommonAreaUnits({
+    buildingUnits,
+    totalFlatUnits,
+  });
+  const commonSharePerFlat = calculateCommonSharePerFlat({
+    commonAreaUnits,
+    occupiedFlatsCount: flatRows.length,
+  });
+
+  return {
+    config,
+    buildingUnits,
+    commonAreaUnits,
+    commonSharePerFlat,
+    flats: flatRows.map((row) => ({
+      flatId: row.flatId,
+      flatUnits: row.flatUnits,
+      breakdown: calculateFlatElectricityBill({
+        flatUnits: row.flatUnits,
+        commonShareUnits: commonSharePerFlat,
+        sanctionedKw: row.sanctionedKw,
+        config,
+      }),
+    })),
+  };
+}
+
+export async function createElectricityBillingRun(
+  supabase: SupabaseClient,
+  input: {
+    billingMonth?: string;
+    readingDate: string;
+    buildingPreviousReading: number;
+    buildingCurrentReading: number;
+    buildingSanctionedKw?: number;
+    buildingBillAmount?: number | null;
+    ratePerUnit?: number;
+    basicChargePerKw?: number;
+    serviceChargePercent?: number;
+    notes?: string | null;
+    flats: Array<{
+      flatId: string;
+      previousReading: number;
+      currentReading: number;
+      sanctionedKw?: number;
+      status?: string;
+    }>;
+  }
+): Promise<
+  | { ok: true; billingRunId: string; preview: ReturnType<typeof previewElectricityBills> }
+  | { ok: false; error: string }
+> {
+  if (!input.readingDate) {
+    return { ok: false, error: "Reading date is required." };
+  }
+  if (input.buildingCurrentReading < input.buildingPreviousReading) {
+    return {
+      ok: false,
+      error: "Building current reading must be ≥ previous reading.",
+    };
+  }
+  if (input.flats.length === 0) {
+    return { ok: false, error: "No occupied flats to bill." };
+  }
+
+  for (const flat of input.flats) {
+    if (flat.currentReading < flat.previousReading) {
+      return {
+        ok: false,
+        error: `Flat reading must be ≥ previous reading.`,
+      };
+    }
+  }
+
+  const preview = previewElectricityBills({
+    buildingPreviousReading: input.buildingPreviousReading,
+    buildingCurrentReading: input.buildingCurrentReading,
+    ratePerUnit: input.ratePerUnit,
+    basicChargePerKw: input.basicChargePerKw,
+    serviceChargePercent: input.serviceChargePercent,
+    flats: input.flats,
+  });
+
+  const billingMonth = input.billingMonth?.trim() || currentMonthKey();
+
+  const { data: run, error: runError } = await supabase
+    .from("electricity_billing_runs")
+    .insert({
+      billing_month: billingMonth,
+      reading_date: input.readingDate,
+      building_previous_reading: input.buildingPreviousReading,
+      building_current_reading: input.buildingCurrentReading,
+      building_sanctioned_kw: input.buildingSanctionedKw ?? 14,
+      building_bill_amount: input.buildingBillAmount ?? null,
+      rate_per_unit: preview.config.ratePerUnit,
+      basic_charge_per_kw: preview.config.basicChargePerKw,
+      service_charge_percent: preview.config.serviceChargePercent,
+      occupied_flats_count: input.flats.length,
+      common_area_units: preview.commonAreaUnits,
+      notes: input.notes?.trim() || null,
+    })
+    .select("id")
+    .single();
+
+  if (runError || !run) {
+    if (/electricity_billing_runs|does not exist/i.test(runError?.message ?? "")) {
+      return {
+        ok: false,
+        error:
+          "Run supabase/migrations/20260829_electricity_billing.sql in Supabase SQL Editor.",
+      };
+    }
+    return { ok: false, error: runError?.message ?? "Could not save billing run." };
+  }
+
+  const readingRows = input.flats.map((flat) => {
+    const calc = preview.flats.find((row) => row.flatId === flat.flatId);
+    const breakdown = calc?.breakdown;
+    const flatUnits = calc?.flatUnits ?? 0;
+    return {
+      flat_id: flat.flatId,
+      billing_run_id: run.id,
+      reading_date: input.readingDate,
+      previous_reading: flat.previousReading,
+      current_reading: flat.currentReading,
+      flat_units: flatUnits,
+      common_share_units: preview.commonSharePerFlat,
+      sanctioned_kw: flat.sanctionedKw ?? 2,
+      energy_charge: breakdown?.energyCharge ?? null,
+      basic_charge: breakdown?.basicCharge ?? null,
+      service_charge_amount: breakdown?.serviceCharge ?? null,
+      bill_amount: breakdown?.totalDue ?? null,
+      status: flat.status?.trim() || "pending",
+      notes: `billing_month:${billingMonth}`,
+    };
+  });
+
+  const { error: readingsError } = await supabase
+    .from("electricity_readings")
+    .insert(readingRows);
+
+  if (readingsError) {
+    await supabase.from("electricity_billing_runs").delete().eq("id", run.id);
+    return { ok: false, error: readingsError.message };
+  }
+
+  return { ok: true, billingRunId: run.id, preview };
 }
 
 export async function createElectricityReading(
@@ -110,6 +488,7 @@ export async function createElectricityReading(
       reading_date: input.readingDate,
       previous_reading: input.previousReading,
       current_reading: input.currentReading,
+      flat_units: Math.max(0, input.currentReading - input.previousReading),
       bill_amount: input.billAmount ?? null,
       status: input.status?.trim() || "recorded",
       notes: input.notes?.trim() || null,

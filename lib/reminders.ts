@@ -1,14 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { listMaintenanceRequests } from "@/lib/maintenance";
+import {
+  formatMonthlyDuesBreakdown,
+  getMonthlyDuesSummary,
+  type MonthlyDuesLedgerRow,
+} from "@/lib/monthly-dues";
 import { listWaterTankers } from "@/lib/ops";
 import type { PaymentStatus } from "@/lib/payment-status";
 import {
   formatBillingMonthLabel,
   formatInr,
 } from "@/lib/receipts";
-import { getRentMonthSummary, type RentLedgerRow } from "@/lib/rent-month";
 
-export type UnpaidReminderRow = RentLedgerRow & {
+export type UnpaidReminderRow = MonthlyDuesLedgerRow & {
   phone: string | null;
   remindedAt: string | null;
   reminderChannel: string | null;
@@ -39,17 +43,14 @@ export function toWhatsAppUrl(
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
-function reminderMessage(row: {
-  flatNumber: string;
-  billingMonthKey: string;
-  outstanding: number;
-}): string {
+function reminderMessage(row: MonthlyDuesLedgerRow): string {
   const month = formatBillingMonthLabel(row.billingMonthKey);
-  return `Hi, reminder for Flat ${row.flatNumber}: rent for ${month} has an outstanding of ${formatInr(row.outstanding)}. Please pay at your earliest. — Dendukuri's Residences`;
+  const breakdown = formatMonthlyDuesBreakdown(row);
+  return `Hi, reminder for Flat ${row.flatNumber}: ${month} dues (${breakdown}) total ${formatInr(row.totalDue)}. Outstanding ${formatInr(row.outstanding)}. Please pay at your earliest. — Dendukuri's Residences`;
 }
 
 /**
- * Unpaid / partial / overdue active tenancies for a month, with reminder status.
+ * Unpaid / partial / overdue active tenancies for a month (rent + monthly charges).
  */
 export async function listUnpaidRentReminders(
   supabase: SupabaseClient,
@@ -59,7 +60,7 @@ export async function listUnpaidRentReminders(
   billingMonthLabel: string;
   rows: UnpaidReminderRow[];
 }> {
-  const summary = await getRentMonthSummary(supabase, billingMonthKey);
+  const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
   const unpaid = summary.rows.filter(
     (row) =>
       row.outstanding > 0 &&
@@ -220,8 +221,8 @@ export async function getTenantMonthDue(
   supabase: SupabaseClient,
   tenancyId: string,
   billingMonthKey?: string
-): Promise<RentLedgerRow | null> {
+): Promise<MonthlyDuesLedgerRow | null> {
   if (!tenancyId) return null;
-  const summary = await getRentMonthSummary(supabase, billingMonthKey);
+  const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
   return summary.rows.find((row) => row.tenancyId === tenancyId) ?? null;
 }

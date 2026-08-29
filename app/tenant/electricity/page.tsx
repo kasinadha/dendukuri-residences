@@ -35,8 +35,24 @@ export default async function TenantElectricityPage() {
                     {formatDisplayDate(row.readingDate)}
                   </p>
                   <p className="text-sm text-slate-500">
-                    {row.units} units · {row.previousReading} → {row.currentReading}
+                    {row.units} flat units
+                    {row.commonShareUnits != null
+                      ? ` + ${row.commonShareUnits.toFixed(2)} common`
+                      : ""}
+                    {" · "}
+                    {row.previousReading} → {row.currentReading}
                   </p>
+                  {row.energyCharge != null ? (
+                    <p className="text-xs text-slate-500">
+                      Energy {formatInr(row.energyCharge)}
+                      {row.basicCharge != null
+                        ? ` · basic ${formatInr(row.basicCharge)}`
+                        : ""}
+                      {row.serviceChargeAmount != null
+                        ? ` · service ${formatInr(row.serviceChargeAmount)}`
+                        : ""}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="text-left sm:text-right">
                   <p className="font-semibold text-slate-900">

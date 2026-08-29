@@ -59,15 +59,19 @@ export default async function TenantHomePage() {
             <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:flex sm:items-center sm:justify-between sm:gap-4">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-wide text-amber-800">
-                  Rent due · {monthDue.billingMonthKey}
+                  Monthly dues · {monthDue.billingMonthKey}
                 </p>
                 <p className="mt-1 text-lg font-bold text-amber-950">
                   Outstanding {formatInr(monthDue.outstanding)} ·{" "}
                   {paymentStatusLabel(monthDue.status)}
                 </p>
                 <p className="mt-1 text-sm text-amber-900">
-                  Due {formatInr(monthDue.amountDue)} · Paid{" "}
-                  {formatInr(monthDue.amountPaid)}
+                  Due {formatInr(monthDue.totalDue)} (rent{" "}
+                  {formatInr(monthDue.rentDue)}
+                  {monthDue.chargesDue > 0
+                    ? ` + charges ${formatInr(monthDue.chargesDue)}`
+                    : ""}
+                  ) · Paid {formatInr(monthDue.amountPaid)}
                 </p>
               </div>
               <Link
@@ -80,7 +84,7 @@ export default async function TenantHomePage() {
           ) : monthDue &&
             (monthDue.status === "paid" || monthDue.status === "waived") ? (
             <p className="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
-              Rent for {monthDue.billingMonthKey} is{" "}
+              Monthly dues for {monthDue.billingMonthKey} are{" "}
               {paymentStatusLabel(monthDue.status).toLowerCase()}.
             </p>
           ) : null}
