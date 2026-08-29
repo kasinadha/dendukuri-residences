@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import {
   clearFlatSchemaCache,
-  createFlat,
   updateFlat,
   type FlatWriteResult,
 } from "@/lib/flats";
@@ -84,29 +83,13 @@ export async function updateTenancyReviewAction(
 export async function createFlatAction(
   formData: FormData
 ): Promise<FlatWriteResult> {
-  const { supabase } = await requireAdmin();
-  clearFlatSchemaCache();
-  const property = await ensureDendukuriProperty(supabase);
-
-  const result = await createFlat(supabase, {
-    flatNumber: asString(formData, "flat_number"),
-    flatType: asString(formData, "flat_type"),
-    floor: asString(formData, "floor") || null,
-    status: asString(formData, "status") || "vacant",
-    monthlyRent: asOptionalNumber(formData, "monthly_rent"),
-    deposit: asOptionalNumber(formData, "deposit"),
-    maintenanceAmount: asOptionalNumber(formData, "maintenance_amount"),
-    notes: asString(formData, "notes") || null,
-    upiId: asString(formData, "upi_id") || null,
-    upiQrUrl: asString(formData, "upi_qr_url") || null,
-    property,
-  });
-
-  if (result.ok) {
-    revalidateFlatPaths();
-    revalidatePath("/tenant/pay");
-  }
-  return result;
+  await requireAdmin();
+  void formData;
+  return {
+    ok: false,
+    error:
+      "Inventory is fixed (Building C + D). Edit an existing flat from the inventory list.",
+  };
 }
 
 export async function updateFlatAction(
@@ -144,6 +127,14 @@ export async function assignTenancy(
   const { supabase } = await requireAdmin();
 
   const mode = asString(formData, "mode") || "existing_flat";
+  if (mode === "new_flat") {
+    return {
+      ok: false,
+      error:
+        "New flats cannot be added. Select a vacant flat from Building C or D.",
+    };
+  }
+
   const flatId = asString(formData, "flat_id");
   const flatNumber = asString(formData, "flat_number");
   const flatType = asString(formData, "flat_type");

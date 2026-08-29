@@ -32,8 +32,8 @@ export default function FlatsInventoryPanel({ flats }: Props) {
         <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
           <h3 className="text-lg font-bold text-slate-900">Inventory</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Live rows from Supabase. Edit floor, rent, deposit, UPI/QR, and
-            notes.
+            All {flats.length} flats (Building C + D). Use Edit on a row to
+            update rent, deposit, UPI/QR, or notes.
           </p>
         </div>
 

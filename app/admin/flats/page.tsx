@@ -1,15 +1,12 @@
 import AdminLayout from "@/components/admin/AdminLayout";
 import AssignTenancyForm from "@/components/admin/AssignTenancyForm";
 import ExportDataPanel from "@/components/admin/ExportDataPanel";
-import FlatEditorForm from "@/components/admin/FlatEditorForm";
 import FlatsInventoryPanel from "@/components/admin/FlatsInventoryPanel";
-import ImportRentalCsvPanel from "@/components/admin/ImportRentalCsvPanel";
 import TenancyReviewPanel from "@/components/admin/TenancyReviewPanel";
 import { requireAdmin } from "@/lib/auth";
 import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { ensureDendukuriProperty } from "@/lib/property";
-import { D201_FLAT_NUMBER } from "@/lib/tenancies";
 import { listTenanciesForReview } from "@/lib/tenancy-review";
 
 export default async function FlatsPage() {
@@ -22,9 +19,6 @@ export default async function FlatsPage() {
 
   const occupied = flats.filter((f) => f.isOccupied).length;
   const vacant = flats.length - occupied;
-  const d201Present = flats.some(
-    (f) => f.flatNumber.toUpperCase() === D201_FLAT_NUMBER
-  );
 
   const vacantFlats = flats
     .filter((f) => !f.isOccupied)
@@ -32,6 +26,13 @@ export default async function FlatsPage() {
       id: f.id,
       label: `Flat ${f.flatNumber}${f.type !== "—" ? ` · ${f.type}` : ""}`,
     }));
+
+  const buildingC = flats.filter(
+    (f) => buildingWingFromFlatNumber(f.flatNumber) === "C"
+  ).length;
+  const buildingD = flats.filter(
+    (f) => buildingWingFromFlatNumber(f.flatNumber) === "D"
+  ).length;
 
   const propertyReady = property.mode === "properties" && Boolean(property.id);
 
@@ -44,14 +45,18 @@ export default async function FlatsPage() {
             Flats
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Real inventory for {property.name}. Import from the master sheet,
-            then review and edit anytime.
+            Fixed inventory — Building C and Building D ({buildingC} + {buildingD}{" "}
+            flats). Edit existing units from the inventory list; assign tenants to
+            vacant flats below.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
           <span className="rounded-xl bg-emerald-50 px-3 py-2 font-semibold text-emerald-900 ring-1 ring-emerald-100">
             {property.name}
             {propertyReady ? " · property linked" : " · run migration"}
+          </span>
+          <span className="rounded-xl bg-white px-3 py-2 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
+            C {buildingC} · D {buildingD}
           </span>
           <span className="rounded-xl bg-white px-3 py-2 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
             {flats.length} total
@@ -76,12 +81,7 @@ export default async function FlatsPage() {
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <div className="space-y-6">
-          <ImportRentalCsvPanel propertyReady={propertyReady} />
-          <FlatEditorForm />
-          <AssignTenancyForm
-            vacantFlats={vacantFlats}
-            d201Present={d201Present}
-          />
+          <AssignTenancyForm vacantFlats={vacantFlats} />
         </div>
         <div className="space-y-6">
           <FlatsInventoryPanel flats={flats} />
