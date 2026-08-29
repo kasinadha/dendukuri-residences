@@ -1,10 +1,12 @@
 import AdminLayout from "@/components/admin/AdminLayout";
 import AssignTenancyForm from "@/components/admin/AssignTenancyForm";
+import ExportDataPanel from "@/components/admin/ExportDataPanel";
 import FlatEditorForm from "@/components/admin/FlatEditorForm";
 import FlatsInventoryPanel from "@/components/admin/FlatsInventoryPanel";
 import ImportRentalCsvPanel from "@/components/admin/ImportRentalCsvPanel";
 import TenancyReviewPanel from "@/components/admin/TenancyReviewPanel";
 import { requireAdmin } from "@/lib/auth";
+import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { ensureDendukuriProperty } from "@/lib/property";
 import { D201_FLAT_NUMBER } from "@/lib/tenancies";
@@ -61,6 +63,15 @@ export default async function FlatsPage() {
             {vacant} vacant
           </span>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <ExportDataPanel
+          flats={flats.map((flat) => ({
+            flatNumber: flat.flatNumber,
+            building: buildingWingFromFlatNumber(flat.flatNumber) ?? "",
+          }))}
+        />
       </div>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
