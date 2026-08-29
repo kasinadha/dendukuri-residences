@@ -90,6 +90,12 @@ export async function createMaintenanceRequest(
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.flatId) return { ok: false, error: "Select a flat." };
   if (!input.title.trim()) return { ok: false, error: "Title is required." };
+  if (
+    input.payerAccountId !== undefined &&
+    !input.payerAccountId?.trim()
+  ) {
+    return { ok: false, error: "Select who paid for this expense." };
+  }
 
   const { data, error } = await supabase
     .from("maintenance_requests")
@@ -101,7 +107,7 @@ export async function createMaintenanceRequest(
       priority: input.priority?.trim() || "normal",
       cost: input.cost ?? null,
       category: input.category?.trim() || null,
-      payer_account_id: input.payerAccountId || null,
+      payer_account_id: input.payerAccountId?.trim() || null,
     })
     .select("id")
     .single();

@@ -1,15 +1,18 @@
 import AdminLayout from "@/components/admin/AdminLayout";
 import WaterPanel from "@/components/admin/WaterPanel";
 import { requireAdmin } from "@/lib/auth";
+import { listFlatsForSelect } from "@/lib/electricity";
+import { formatExpenseLocation } from "@/lib/expense-location";
 import { listVendors, listWaterTankers } from "@/lib/ops";
 import { listPaymentAccounts, toPaymentAccountOptions } from "@/lib/payment-accounts";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default async function WaterPage() {
   const { supabase } = await requireAdmin();
-  const [vendors, tankers, accountsResult] = await Promise.all([
+  const [vendors, tankers, flats, accountsResult] = await Promise.all([
     listVendors(supabase),
     listWaterTankers(supabase),
+    listFlatsForSelect(supabase),
     listPaymentAccounts(supabase),
   ]);
   const accounts = accountsResult.accounts;
@@ -22,11 +25,13 @@ export default async function WaterPage() {
           Water Tankers
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
-          Record tanker deliveries and supplier payment status.
+          Record tanker deliveries with building, optional flat, supplier payment
+          status, and who paid.
         </p>
       </div>
       <WaterPanel
         vendors={vendors.map((v) => ({ id: v.id, label: v.name }))}
+        flats={flats}
         accounts={toPaymentAccountOptions(accounts)}
         rows={tankers.map((row) => ({
           id: row.id,
@@ -34,6 +39,10 @@ export default async function WaterPage() {
           amountLabel: row.amount != null ? formatInr(row.amount) : "—",
           vendorName: row.vendorName ?? "No vendor",
           paymentStatus: row.paymentStatus ?? "—",
+          locationLabel: formatExpenseLocation({
+            buildingWing: row.buildingWing,
+            flatNumber: row.flatNumber,
+          }),
           payerLabel: row.payerAccountLabel,
           notes: row.notes,
         }))}

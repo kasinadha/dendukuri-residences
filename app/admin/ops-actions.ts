@@ -11,6 +11,7 @@ import {
   updateWaterTankerPaymentStatus,
 } from "@/lib/ops";
 import { buildRentReminderMessage, markRentReminded } from "@/lib/reminders";
+import { parseExpenseBuildingWing } from "@/lib/expense-location";
 import { sendWhatsAppBusinessMessage } from "@/lib/whatsapp";
 
 function asString(formData: FormData, key: string): string {
@@ -33,16 +34,27 @@ export async function createVendorAction(formData: FormData) {
 export async function createWaterTankerAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const amountRaw = asString(formData, "amount");
+  const buildingWing = parseExpenseBuildingWing(asString(formData, "building_wing"));
+  const payerAccountId = asString(formData, "payer_account_id");
+  if (!buildingWing) {
+    return { ok: false as const, error: "Select which building this tanker is for." };
+  }
+  if (!payerAccountId) {
+    return { ok: false as const, error: "Select who paid for this tanker." };
+  }
   const result = await createWaterTanker(supabase, {
     deliveryDate: asString(formData, "delivery_date"),
     amount: amountRaw ? Number(amountRaw) : null,
     vendorId: asString(formData, "vendor_id") || null,
     paymentStatus: asString(formData, "payment_status") || "pending",
-    payerAccountId: asString(formData, "payer_account_id") || null,
+    buildingWing,
+    flatId: asString(formData, "flat_id") || null,
+    payerAccountId,
     notes: asString(formData, "notes") || null,
   });
   if (result.ok) revalidatePath("/admin/water");
   if (result.ok) revalidatePath("/admin/reports");
+  if (result.ok) revalidatePath("/admin/expenses");
   return result;
 }
 

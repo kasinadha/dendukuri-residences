@@ -16,6 +16,10 @@ export async function createMaintenanceAction(formData: FormData) {
   const { supabase } = await requireAdmin();
 
   const costRaw = asString(formData, "cost");
+  const payerAccountId = asString(formData, "payer_account_id");
+  if (!payerAccountId) {
+    return { ok: false as const, error: "Select who paid for this maintenance." };
+  }
   const result = await createMaintenanceRequest(supabase, {
     flatId: asString(formData, "flat_id"),
     title: asString(formData, "title"),
@@ -24,12 +28,13 @@ export async function createMaintenanceAction(formData: FormData) {
     priority: asString(formData, "priority") || "normal",
     cost: costRaw ? Number(costRaw) : null,
     category: asString(formData, "category") || null,
-    payerAccountId: asString(formData, "payer_account_id") || null,
+    payerAccountId,
   });
 
   if (result.ok) {
     revalidatePath("/admin/maintenance");
     revalidatePath("/admin/reports");
+    revalidatePath("/admin/expenses");
     revalidatePath("/tenant");
   }
 

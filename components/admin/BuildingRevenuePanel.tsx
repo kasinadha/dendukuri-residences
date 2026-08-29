@@ -88,8 +88,8 @@ export default function BuildingRevenuePanel({
           <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">
             {report.expensesByPayer.length === 0 ? (
               <li className="px-4 py-3 text-sm text-slate-500">
-                No tagged expenses yet. Select who paid when recording water
-                tankers or maintenance.
+                No tagged expenses yet. Record building, flat, and who paid for
+                water tankers, maintenance, or other expenses.
               </li>
             ) : (
               report.expensesByPayer.map((row) => (

@@ -1,19 +1,23 @@
 "use client";
 
-import { FormEvent, useState, useTransition } from "react";
+import { FormEvent, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   createMaintenanceAction,
   updateMaintenanceStatusAction,
 } from "@/app/admin/maintenance/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
+import {
+  filterFlatsByBuilding,
+  type FlatLocationOption,
+} from "@/lib/expense-location";
+import type { BuildingWing } from "@/lib/building-wing";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
-
-type FlatOption = { id: string; label: string };
 
 type RequestRow = {
   id: string;
   flatNumber: string;
+  buildingLabel: string;
   title: string;
   description: string | null;
   status: string;
@@ -28,7 +32,7 @@ export default function MaintenancePanel({
   requests,
   accounts,
 }: {
-  flats: FlatOption[];
+  flats: FlatLocationOption[];
   requests: RequestRow[];
   accounts: PaymentAccountOption[];
 }) {
@@ -36,6 +40,12 @@ export default function MaintenancePanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [building, setBuilding] = useState<BuildingWing | "">("");
+
+  const filteredFlats = useMemo(
+    () => filterFlatsByBuilding(flats, building || "all"),
+    [flats, building]
+  );
 
   function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,6 +60,7 @@ export default function MaintenancePanel({
       }
       setSuccess("Request created.");
       event.currentTarget.reset();
+      setBuilding("");
       router.refresh();
     });
   }
@@ -75,27 +86,50 @@ export default function MaintenancePanel({
         className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
       >
         <h3 className="text-lg font-bold text-slate-900">New request</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          Select building and flat, then record who paid.
+        </p>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <label className="block sm:col-span-2">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Building
+            </span>
+            <select
+              required
+              value={building}
+              onChange={(event) =>
+                setBuilding(event.target.value as BuildingWing | "")
+              }
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+            >
+              <option value="">Select building</option>
+              <option value="C">Building C</option>
+              <option value="D">Building D</option>
+            </select>
+          </label>
+          <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
               Flat
             </span>
             <select
               name="flat_id"
               required
-              disabled={flats.length === 0}
+              disabled={!building || filteredFlats.length === 0}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-              defaultValue={flats[0]?.id}
+              defaultValue=""
             >
-              {flats.length === 0 ? (
-                <option value="">No flats</option>
-              ) : (
-                flats.map((flat) => (
-                  <option key={flat.id} value={flat.id}>
-                    {flat.label}
-                  </option>
-                ))
-              )}
+              <option value="">
+                {!building
+                  ? "Select building first"
+                  : filteredFlats.length === 0
+                    ? "No flats in this building"
+                    : "Select flat"}
+              </option>
+              {filteredFlats.map((flat) => (
+                <option key={flat.id} value={flat.id}>
+                  {flat.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="block sm:col-span-2">
@@ -150,9 +184,9 @@ export default function MaintenancePanel({
               accounts={accounts}
               name="payer_account_id"
               label="Paid by (account)"
-              hint="Who is paying for this repair — Joint, Kasi, Kanthu, or Pratyu."
-              allowEmpty
-              emptyLabel="Not specified"
+              hint="Who paid for this repair — Joint, Kasi, Kanthu, or Pratyu."
+              required
+              allowEmpty={false}
             />
           </div>
           <label className="block sm:col-span-2">
@@ -199,7 +233,7 @@ export default function MaintenancePanel({
                   <div>
                     <p className="font-semibold text-slate-900">{row.title}</p>
                     <p className="mt-1 text-sm text-slate-500">
-                      Flat {row.flatNumber} · {row.priority}
+                      {row.buildingLabel} · Flat {row.flatNumber} · {row.priority}
                       {row.category ? ` · ${row.category}` : ""}
                       {row.payerLabel ? ` · Paid by ${row.payerLabel}` : ""}
                     </p>

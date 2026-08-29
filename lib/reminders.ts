@@ -5,6 +5,7 @@ import {
   getMonthlyDuesSummary,
   type MonthlyDuesLedgerRow,
 } from "@/lib/monthly-dues";
+import { formatExpenseLocation } from "@/lib/expense-location";
 import { listWaterTankers } from "@/lib/ops";
 import type { PaymentStatus } from "@/lib/payment-status";
 import {
@@ -185,9 +186,17 @@ export async function listOwnerDueReminders(
       id: row.id,
       kind: "water" as const,
       title: `Water tanker · ${row.deliveryDate}`,
-      detail: row.vendorName
-        ? `Vendor ${row.vendorName} · ${row.paymentStatus || "pending"}`
-        : row.paymentStatus || "pending",
+      detail: [
+        formatExpenseLocation({
+          buildingWing: row.buildingWing,
+          flatNumber: row.flatNumber,
+        }),
+        row.vendorName ? `Vendor ${row.vendorName}` : null,
+        row.payerAccountLabel ? `Paid by ${row.payerAccountLabel}` : null,
+        row.paymentStatus || "pending",
+      ]
+        .filter(Boolean)
+        .join(" · "),
       amount: row.amount,
       status: row.paymentStatus || "pending",
       href: "/admin/water",

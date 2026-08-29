@@ -14,6 +14,7 @@ import {
   CircleHelp,
   BarChart3,
   Landmark,
+  Receipt,
 } from "lucide-react";
 
 export const adminNavItems = [
@@ -25,6 +26,7 @@ export const adminNavItems = [
   { label: "Electricity", href: "/admin/electricity", icon: Zap },
   { label: "Maintenance", href: "/admin/maintenance", icon: Wrench },
   { label: "Water Tankers", href: "/admin/water", icon: Droplets },
+  { label: "Other Expenses", href: "/admin/expenses", icon: Receipt },
   { label: "Vendors", href: "/admin/vendors", icon: ContactRound },
   { label: "FAQs", href: "/admin/faqs", icon: CircleHelp },
   { label: "Reports", href: "/admin/reports", icon: BarChart3 },
