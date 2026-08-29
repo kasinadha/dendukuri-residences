@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
+import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
 import {
   completeMoveRequest,
   createVendor,
@@ -9,7 +10,8 @@ import {
   updateVacateStatus,
   updateWaterTankerPaymentStatus,
 } from "@/lib/ops";
-import { markRentReminded } from "@/lib/reminders";
+import { buildRentReminderMessage, markRentReminded } from "@/lib/reminders";
+import { sendWhatsAppBusinessMessage } from "@/lib/whatsapp";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -92,6 +94,56 @@ export async function markRentRemindedAction(formData: FormData) {
     revalidatePath("/admin/payments");
   }
   return result;
+}
+
+export async function sendWhatsAppReminderAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const tenancyId = asString(formData, "tenancy_id");
+  const billingMonth = asString(formData, "billing_month");
+  if (!tenancyId || !/^\d{4}-\d{2}$/.test(billingMonth)) {
+    return { ok: false as const, error: "Missing tenancy or billing month." };
+  }
+
+  const summary = await getMonthlyDuesSummary(supabase, billingMonth);
+  const row = summary.rows.find((item) => item.tenancyId === tenancyId);
+  if (!row) {
+    return { ok: false as const, error: "Tenancy not found for this month." };
+  }
+
+  const { data: tenancyMeta } = await supabase
+    .from("tenancies")
+    .select("id, tenants ( phone )")
+    .eq("id", tenancyId)
+    .maybeSingle();
+
+  const tenant = Array.isArray(tenancyMeta?.tenants)
+    ? tenancyMeta?.tenants[0]
+    : tenancyMeta?.tenants;
+  const phone = tenant?.phone?.trim() || null;
+  if (!phone) {
+    return { ok: false as const, error: "Tenant has no mobile number on file." };
+  }
+
+  const message = buildRentReminderMessage(row);
+  const sendResult = await sendWhatsAppBusinessMessage({
+    toPhone: phone,
+    body: message,
+  });
+  if (!sendResult.ok) return sendResult;
+
+  const markResult = await markRentReminded(supabase, {
+    tenancyId,
+    billingMonth,
+    remindedBy: user.id,
+    channel: "whatsapp_api",
+    notes: `wa_message_id:${sendResult.messageId}`,
+  });
+
+  if (!markResult.ok) return markResult;
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/payments");
+  return { ok: true as const, messageId: sendResult.messageId };
 }
 
 export async function updateWaterTankerPaymentStatusAction(formData: FormData) {

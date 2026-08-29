@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { markRentRemindedAction } from "@/app/admin/ops-actions";
+import { markRentRemindedAction, sendWhatsAppReminderAction } from "@/app/admin/ops-actions";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr } from "@/lib/receipts";
 import type { UnpaidReminderRow } from "@/lib/reminders";
+import { WHATSAPP_BUSINESS_PHONE_E164 } from "@/lib/whatsapp";
 
 function statusBadgeClass(status: string) {
   switch (status) {
@@ -37,10 +38,14 @@ export default function UnpaidRentRemindersPanel({
   billingMonthKey,
   billingMonthLabel,
   rows,
+  whatsappBusinessPhone,
+  whatsappApiEnabled,
 }: {
   billingMonthKey: string;
   billingMonthLabel: string;
   rows: UnpaidReminderRow[];
+  whatsappBusinessPhone: string;
+  whatsappApiEnabled?: boolean;
 }) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -65,6 +70,23 @@ export default function UnpaidRentRemindersPanel({
     });
   }
 
+  function sendViaApi(row: UnpaidReminderRow) {
+    setError("");
+    setPendingId(row.tenancyId);
+    const formData = new FormData();
+    formData.set("tenancy_id", row.tenancyId);
+    formData.set("billing_month", billingMonthKey);
+    startTransition(async () => {
+      const result = await sendWhatsAppReminderAction(formData);
+      setPendingId(null);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
@@ -73,7 +95,39 @@ export default function UnpaidRentRemindersPanel({
         </h3>
         <p className="mt-1 text-sm text-slate-500">
           Rent plus maintenance, parking, washer, and other monthly charges.
-          WhatsApp opens a draft; then mark reminded.
+          {whatsappApiEnabled
+            ? " Send directly from your business WhatsApp API, or open a draft in WhatsApp Web."
+            : " Open WhatsApp with a pre-filled message, then mark reminded."}
+        </p>
+        <p className="mt-2 text-xs text-slate-600">
+          Send from business WhatsApp{" "}
+          <span className="font-semibold">{whatsappBusinessPhone}</span>
+          {!whatsappApiEnabled ? (
+            <>
+              {" "}
+              · Log into{" "}
+              <a
+                href="https://web.whatsapp.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-emerald-700 underline"
+              >
+                web.whatsapp.com
+              </a>{" "}
+              with{" "}
+              <a
+                href={`https://wa.me/${WHATSAPP_BUSINESS_PHONE_E164}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-emerald-700 underline"
+              >
+                this number
+              </a>{" "}
+              before opening a draft.
+            </>
+          ) : (
+            " via API, or open a draft in WhatsApp Web."
+          )}
         </p>
       </div>
 
@@ -148,15 +202,25 @@ export default function UnpaidRentRemindersPanel({
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {whatsappApiEnabled && row.phone ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => sendViaApi(row)}
+                      className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {busy ? "Sending…" : "Send from business WhatsApp"}
+                    </button>
+                  ) : null}
                   {row.whatsappUrl ? (
                     <a
                       href={row.whatsappUrl}
                       target="_blank"
                       rel="noreferrer"
                       onClick={() => markReminded(row, "whatsapp")}
-                      className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"
+                      className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900"
                     >
-                      WhatsApp + mark reminded
+                      Open WhatsApp draft
                     </a>
                   ) : null}
                   <button

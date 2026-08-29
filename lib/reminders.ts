@@ -11,6 +11,11 @@ import {
   formatBillingMonthLabel,
   formatInr,
 } from "@/lib/receipts";
+import {
+  formatWhatsAppBusinessPhoneDisplay,
+  getWhatsAppBusinessConfig,
+  toTenantWhatsAppUrl,
+} from "@/lib/whatsapp";
 
 export type UnpaidReminderRow = MonthlyDuesLedgerRow & {
   phone: string | null;
@@ -29,24 +34,17 @@ export type OwnerDueItem = {
   href: string;
 };
 
-function digitsOnly(value: string | null | undefined): string {
-  return (value ?? "").replace(/\D/g, "");
-}
-
-export function toWhatsAppUrl(
-  phone: string | null | undefined,
-  message: string
-): string | null {
-  let digits = digitsOnly(phone);
-  if (digits.length === 10) digits = `91${digits}`;
-  if (digits.length < 11) return null;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+export function buildRentReminderMessage(row: MonthlyDuesLedgerRow): string {
+  const month = formatBillingMonthLabel(row.billingMonthKey);
+  const breakdown = formatMonthlyDuesBreakdown(row);
+  const businessWhatsApp = formatWhatsAppBusinessPhoneDisplay(
+    getWhatsAppBusinessConfig().businessPhone
+  );
+  return `Hi, reminder for Flat ${row.flatNumber}: ${month} dues (${breakdown}) total ${formatInr(row.totalDue)}. Outstanding ${formatInr(row.outstanding)}. Please pay at your earliest. — Dendukuri's Residences (${businessWhatsApp})`;
 }
 
 function reminderMessage(row: MonthlyDuesLedgerRow): string {
-  const month = formatBillingMonthLabel(row.billingMonthKey);
-  const breakdown = formatMonthlyDuesBreakdown(row);
-  return `Hi, reminder for Flat ${row.flatNumber}: ${month} dues (${breakdown}) total ${formatInr(row.totalDue)}. Outstanding ${formatInr(row.outstanding)}. Please pay at your earliest. — Dendukuri's Residences`;
+  return buildRentReminderMessage(row);
 }
 
 /**
@@ -117,7 +115,7 @@ export async function listUnpaidRentReminders(
       phone,
       remindedAt: reminder?.remindedAt ?? null,
       reminderChannel: reminder?.channel ?? null,
-      whatsappUrl: toWhatsAppUrl(phone, reminderMessage(row)),
+      whatsappUrl: toTenantWhatsAppUrl(phone, reminderMessage(row)),
     };
   });
 
