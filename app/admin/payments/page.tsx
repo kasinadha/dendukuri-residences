@@ -2,6 +2,7 @@ import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
 import OwnerDuesRemindersPanel from "@/components/admin/OwnerDuesRemindersPanel";
 import PaymentSubmissionsPanel from "@/components/admin/PaymentSubmissionsPanel";
+import PaymentVoidButton from "@/components/admin/PaymentVoidButton";
 import RecordPaymentForm, {
   type TenancyOption,
 } from "@/components/admin/RecordPaymentForm";
@@ -368,6 +369,14 @@ export default async function PaymentsPage({ searchParams }: Props) {
                       </Link>
                     </>
                   ) : null}
+                  <PaymentVoidButton
+                    paymentId={row.paymentId}
+                    flatNumber={row.flatNumber}
+                    tenantName={row.tenantName}
+                    billingMonthLabel={row.billingMonthLabel}
+                    amountPaidLabel={formatInr(row.amountPaid)}
+                    receiptNumber={row.receiptNumber}
+                  />
                 </div>
               </li>
             ))}

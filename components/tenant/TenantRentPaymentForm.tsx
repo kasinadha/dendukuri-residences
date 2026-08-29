@@ -57,18 +57,35 @@ export default function TenantRentPaymentForm({
     const formData = new FormData(event.currentTarget);
     formData.set("tenancy_id", tenancyId);
     startTransition(async () => {
-      const result = await tenantSubmitRentPayment(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await tenantSubmitRentPayment(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSuccess(
+          "Submitted. The owner will confirm the UTR and your receipt will appear under Receipts."
+        );
+        event.currentTarget?.reset();
+        setAmount(monthlyRent != null ? String(monthlyRent) : "");
+        setBillingMonth(defaultBillingMonth);
+        router.refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/Failed to find Server Action|server action/i.test(message)) {
+          setError(
+            "This page is out of date after a recent update. Reload, then submit again."
+          );
+          return;
+        }
+        if (/Body exceeded|body size limit|413/i.test(message)) {
+          setError(
+            "Screenshot is too large. Use a smaller image (under 5 MB) or submit without a screenshot."
+          );
+          return;
+        }
+        setError(message || "Something went wrong. Reload and try again.");
       }
-      setSuccess(
-        "Submitted. The owner will confirm the UTR and your receipt will appear under Receipts."
-      );
-      event.currentTarget.reset();
-      setAmount(monthlyRent != null ? String(monthlyRent) : "");
-      setBillingMonth(defaultBillingMonth);
-      router.refresh();
     });
   }
 

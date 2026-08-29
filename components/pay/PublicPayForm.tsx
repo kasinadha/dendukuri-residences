@@ -23,6 +23,17 @@ type LookedUpFlat = {
 
 const PURPOSES: PaymentPurpose[] = ["rent", "advance", "maintenance"];
 
+function formatActionError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/Failed to find Server Action|server action/i.test(message)) {
+    return "This page is out of date after a recent update. Reload the page (hard refresh), then submit again.";
+  }
+  if (/Body exceeded|body size limit|413/i.test(message)) {
+    return "Upload is too large. Remove the screenshot or use a smaller image (under 5 MB), then try again.";
+  }
+  return message || "Something went wrong. Reload the page and try again.";
+}
+
 export default function PublicPayForm() {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -57,16 +68,21 @@ export default function PublicPayForm() {
     setSuccess("");
     const formData = new FormData(event.currentTarget);
     startTransition(async () => {
-      const result = await lookupPublicFlatAction(formData);
-      if (!result.ok) {
+      try {
+        const result = await lookupPublicFlatAction(formData);
+        if (!result.ok) {
+          setFlat(null);
+          setError(result.error);
+          return;
+        }
+        setFlat(result.flat);
+        setFlatInput(result.flat.flatNumber);
+        // Never preload rent/deposit/maintenance for anonymous payers.
+        setAmount("");
+      } catch (err) {
         setFlat(null);
-        setError(result.error);
-        return;
+        setError(formatActionError(err));
       }
-      setFlat(result.flat);
-      setFlatInput(result.flat.flatNumber);
-      // Never preload rent/deposit/maintenance for anonymous payers.
-      setAmount("");
     });
   }
 
@@ -86,17 +102,21 @@ export default function PublicPayForm() {
     formData.set("flat_number", flat.flatNumber);
     formData.set("purpose", purpose);
     startTransition(async () => {
-      const result = await submitPublicPayClaimAction(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await submitPublicPayClaimAction(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSuccess(
+          "Submitted. The owner will review your UTR. A receipt is only created after approval."
+        );
+        event.currentTarget?.reset();
+        setAmount("");
+        setBillingMonth(currentBillingMonthKey());
+      } catch (err) {
+        setError(formatActionError(err));
       }
-      setSuccess(
-        "Submitted. The owner will review your UTR. A receipt is only created after approval."
-      );
-      event.currentTarget.reset();
-      setAmount("");
-      setBillingMonth(currentBillingMonthKey());
     });
   }
 
