@@ -36,18 +36,29 @@ export default function TenantLoginActions({
     setError("");
     setSuccess("");
     startTransition(async () => {
-      const result = await action(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await action(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        const extra =
+          "loginEmail" in result && result.loginEmail
+            ? ` Login email: ${result.loginEmail}`
+            : "";
+        setSuccess(okMessage + extra);
+        setOpen(false);
+        router.refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/Failed to find Server Action|server action/i.test(message)) {
+          setError(
+            "This page is out of date after a deploy. Click Reload (or hard-refresh), then try Create login again."
+          );
+          return;
+        }
+        setError(message || "Something went wrong. Reload the page and try again.");
       }
-      const extra =
-        "loginEmail" in result && result.loginEmail
-          ? ` Login email: ${result.loginEmail}`
-          : "";
-      setSuccess(okMessage + extra);
-      setOpen(false);
-      router.refresh();
     });
   }
 

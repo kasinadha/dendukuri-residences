@@ -104,19 +104,39 @@ export async function createTenantPortalLogin(
     });
   }
 
-  if (created.error || !created.data.user) {
+  let userId = created.data.user?.id ?? null;
+  let createdNewAuthUser = Boolean(userId);
+
+  if (created.error || !userId) {
     const msg = created.error?.message ?? "Could not create login.";
     if (/already registered|already exists|duplicate/i.test(msg)) {
-      return {
-        ok: false,
-        error:
-          "This mobile or email is already registered in Auth. Link manually or use a different number.",
-      };
+      // Previous attempt may have created Auth user then failed on link —
+      // recover by finding that user and completing profile + tenant link.
+      const existing = await findAuthUserByLoginEmail(admin, loginEmail);
+      if (!existing) {
+        return {
+          ok: false,
+          error:
+            "This mobile or email is already registered in Auth, but could not be linked automatically. In Supabase → Authentication → Users, remove the orphan user or link tenants.profile_id manually.",
+        };
+      }
+      userId = existing.id;
+      createdNewAuthUser = false;
+      // Ensure password matches what admin just entered
+      const { error: pwdError } = await admin.auth.admin.updateUserById(
+        userId,
+        { password, email_confirm: true }
+      );
+      if (pwdError) {
+        return {
+          ok: false,
+          error: `Found existing Auth user but could not update password: ${pwdError.message}`,
+        };
+      }
+    } else {
+      return { ok: false, error: msg };
     }
-    return { ok: false, error: msg };
   }
-
-  const userId = created.data.user.id;
 
   const { error: profileError } = await admin.from("profiles").upsert(
     {
@@ -129,7 +149,9 @@ export async function createTenantPortalLogin(
   );
 
   if (profileError) {
-    await admin.auth.admin.deleteUser(userId);
+    if (createdNewAuthUser) {
+      await admin.auth.admin.deleteUser(userId);
+    }
     return {
       ok: false,
       error: profileError.message ?? "Could not create tenant profile.",
@@ -150,7 +172,9 @@ export async function createTenantPortalLogin(
     .eq("id", tenantId);
 
   if (linkError) {
-    await admin.auth.admin.deleteUser(userId);
+    if (createdNewAuthUser) {
+      await admin.auth.admin.deleteUser(userId);
+    }
     return {
       ok: false,
       error: linkError.message ?? "Could not link tenant to login.",
@@ -158,6 +182,40 @@ export async function createTenantPortalLogin(
   }
 
   return { ok: true, userId, loginEmail };
+}
+
+async function findAuthUserByLoginEmail(
+  admin: SupabaseClient,
+  loginEmail: string
+): Promise<{ id: string } | null> {
+  const email = loginEmail.trim().toLowerCase();
+  // Prefer getUserByEmail when available on this supabase-js version
+  const byEmail = await (
+    admin.auth.admin as {
+      getUserByEmail?: (
+        email: string
+      ) => Promise<{ data: { user: { id: string } | null }; error: unknown }>;
+    }
+  ).getUserByEmail?.(email);
+
+  if (byEmail?.data?.user?.id) {
+    return { id: byEmail.data.user.id };
+  }
+
+  // Fallback: page through users (small tenant counts)
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+    if (error || !data?.users?.length) break;
+    const match = data.users.find(
+      (u) => u.email?.trim().toLowerCase() === email
+    );
+    if (match) return { id: match.id };
+    if (data.users.length < 200) break;
+  }
+  return null;
 }
 
 export async function resetTenantPortalPassword(
