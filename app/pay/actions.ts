@@ -54,61 +54,76 @@ export async function lookupPublicFlatAction(formData: FormData) {
 }
 
 export async function submitPublicPayClaimAction(formData: FormData) {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  const purpose = asPurpose(asString(formData, "purpose"));
-  if (!purpose) {
-    return { ok: false as const, error: "Choose Rent, Advance, or Maintenance." };
+    const purpose = asPurpose(asString(formData, "purpose"));
+    if (!purpose) {
+      return { ok: false as const, error: "Choose Rent, Advance, or Maintenance." };
+    }
+
+    const flatNumber = asString(formData, "flat_number");
+    if (!flatNumber) {
+      return { ok: false as const, error: "Flat number is required." };
+    }
+
+    const amount = Number(asString(formData, "amount"));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false as const, error: "Enter a valid amount." };
+    }
+
+    const proofFile = asFile(formData, "proof");
+    const validated = validatePaymentProofFile(proofFile);
+    if (!validated.ok) return { ok: false as const, error: validated.error };
+
+    let proofPath: string | null = null;
+    if (validated.file) {
+      const uploaded = await uploadPublicPaymentProof(supabase, validated.file);
+      if (!uploaded.ok) return { ok: false as const, error: uploaded.error };
+      proofPath = uploaded.path;
+    }
+
+    const lookup = await lookupFlatForPublicPay(supabase, flatNumber);
+    if (!lookup.ok) return lookup;
+
+    const { upiId } = resolveRentUpiDisplay({
+      upiId: lookup.flat.upiId,
+      upiQrUrl: lookup.flat.upiQrUrl,
+    });
+
+    const billingMonth = asString(formData, "billing_month") || null;
+
+    const result = await submitPublicPaymentClaim(supabase, {
+      flatNumber,
+      purpose,
+      amount,
+      paymentDate: asString(formData, "payment_date"),
+      utr: asString(formData, "utr"),
+      payerName: asString(formData, "payer_name"),
+      payerPhone: asString(formData, "payer_phone"),
+      billingMonth: purpose === "rent" ? billingMonth : billingMonth,
+      notes: asString(formData, "notes") || null,
+      upiId,
+      proofPath,
+    });
+
+    if (result.ok) {
+      revalidatePath("/pay");
+      revalidatePath("/admin/payments");
+    }
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/Body exceeded|body size limit|413/i.test(message)) {
+      return {
+        ok: false as const,
+        error:
+          "Upload is too large. Remove the screenshot or use a smaller image (under 5 MB).",
+      };
+    }
+    return {
+      ok: false as const,
+      error: message || "Could not submit payment claim.",
+    };
   }
-
-  const flatNumber = asString(formData, "flat_number");
-  if (!flatNumber) {
-    return { ok: false as const, error: "Flat number is required." };
-  }
-
-  const amount = Number(asString(formData, "amount"));
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return { ok: false as const, error: "Enter a valid amount." };
-  }
-
-  const proofFile = asFile(formData, "proof");
-  const validated = validatePaymentProofFile(proofFile);
-  if (!validated.ok) return { ok: false as const, error: validated.error };
-
-  let proofPath: string | null = null;
-  if (validated.file) {
-    const uploaded = await uploadPublicPaymentProof(supabase, validated.file);
-    if (!uploaded.ok) return { ok: false as const, error: uploaded.error };
-    proofPath = uploaded.path;
-  }
-
-  const lookup = await lookupFlatForPublicPay(supabase, flatNumber);
-  if (!lookup.ok) return lookup;
-
-  const { upiId } = resolveRentUpiDisplay({
-    upiId: lookup.flat.upiId,
-    upiQrUrl: lookup.flat.upiQrUrl,
-  });
-
-  const billingMonth = asString(formData, "billing_month") || null;
-
-  const result = await submitPublicPaymentClaim(supabase, {
-    flatNumber,
-    purpose,
-    amount,
-    paymentDate: asString(formData, "payment_date"),
-    utr: asString(formData, "utr"),
-    payerName: asString(formData, "payer_name"),
-    payerPhone: asString(formData, "payer_phone"),
-    billingMonth: purpose === "rent" ? billingMonth : billingMonth,
-    notes: asString(formData, "notes") || null,
-    upiId,
-    proofPath,
-  });
-
-  if (result.ok) {
-    revalidatePath("/pay");
-    revalidatePath("/admin/payments");
-  }
-  return result;
 }

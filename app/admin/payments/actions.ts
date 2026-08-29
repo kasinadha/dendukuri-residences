@@ -19,6 +19,7 @@ import {
   encodeBillingMonthNote,
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
+import { voidPaymentRecord } from "@/lib/void-payment";
 
 export type RecordPaymentResult =
   | {
@@ -192,4 +193,34 @@ export async function recordRentPayment(
       error: `Receipt creation failed (${detail}). Payment was rolled back. If this persists, check receipts table RLS and run supabase/migrations/20260808_receipt_number_uniqueness.sql.`,
     };
   }
+}
+
+function revalidateAfterPaymentChange() {
+  revalidatePath("/admin/payments");
+  revalidatePath("/admin/receipts");
+  revalidatePath("/admin");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin/tenants");
+  revalidatePath("/tenant/receipts");
+  revalidatePath("/tenant/pay");
+  revalidatePath("/tenant");
+}
+
+export async function voidPaymentAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const paymentId = asString(formData, "payment_id");
+  const confirm = asString(formData, "confirm");
+
+  if (confirm.toUpperCase() !== "VOID") {
+    return { ok: false as const, error: 'Type VOID to confirm deletion.' };
+  }
+  if (!paymentId) {
+    return { ok: false as const, error: "Missing payment id." };
+  }
+
+  const result = await voidPaymentRecord(supabase, paymentId);
+  if (result.ok) {
+    revalidateAfterPaymentChange();
+  }
+  return result;
 }
