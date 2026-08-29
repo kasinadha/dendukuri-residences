@@ -8,11 +8,12 @@ import { formatInr } from "@/lib/receipts";
 
 export default async function MaintenancePage() {
   const { supabase } = await requireAdmin();
-  const [flats, requests, accounts] = await Promise.all([
+  const [flats, requests, accountsResult] = await Promise.all([
     listFlatsForSelect(supabase),
     listMaintenanceRequests(supabase),
     listPaymentAccounts(supabase),
   ]);
+  const accounts = accountsResult.accounts;
 
   return (
     <AdminLayout>

@@ -1,4 +1,5 @@
 import AdminLayout from "@/components/admin/AdminLayout";
+import TenantDetailsEditor from "@/components/admin/TenantDetailsEditor";
 import TenantLoginActions from "@/components/admin/TenantLoginActions";
 import TenantOccupancyActions from "@/components/admin/TenantOccupancyActions";
 import { requireAdmin } from "@/lib/auth";
@@ -29,8 +30,10 @@ export default async function TenantsPage() {
             Tenants
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Tenant profiles with linked flat and rent. Create portal logins
-            (mobile + password), transfer, or mark vacated.
+            Tenant profiles with linked flat, rent, and advance/deposit. Contact
+            details are freely editable; rent and advance are locked and need
+            confirmation to change. Portal logins, transfer, and vacate are
+            separate.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -50,21 +53,23 @@ export default async function TenantsPage() {
           </p>
         ) : (
           <>
-            <div className="hidden border-b border-slate-100 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[1.1fr_1fr_0.75fr_0.65fr_0.75fr_0.75fr_1fr_1fr] lg:gap-3 lg:px-6">
+            <div className="hidden border-b border-slate-100 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[1fr_0.95fr_0.6fr_0.55fr_0.65fr_0.85fr_0.6fr_0.9fr_0.85fr_1fr] lg:gap-3 lg:px-6">
               <span>Name</span>
               <span>Contact</span>
               <span>Flat</span>
               <span>Type</span>
               <span>Rent</span>
+              <span>Advance</span>
               <span>Status</span>
               <span>Portal login</span>
               <span>Occupancy</span>
+              <span>Details</span>
             </div>
             <ul className="divide-y divide-slate-100">
               {tenants.map((tenant) => (
                 <li
                   key={tenant.id}
-                  className="grid gap-2 px-5 py-4 lg:grid-cols-[1.1fr_1fr_0.75fr_0.65fr_0.75fr_0.75fr_1fr_1fr] lg:items-start lg:gap-3 lg:px-6"
+                  className="grid gap-2 px-5 py-4 lg:grid-cols-[1fr_0.95fr_0.6fr_0.55fr_0.65fr_0.85fr_0.6fr_0.9fr_0.85fr_1fr] lg:items-start lg:gap-3 lg:px-6"
                 >
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
@@ -113,6 +118,44 @@ export default async function TenantsPage() {
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
+                      Advance
+                    </p>
+                    {tenant.hasActiveTenancy ? (
+                      <>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {tenant.depositAmount != null
+                            ? formatInr(tenant.depositAmount)
+                            : "—"}{" "}
+                          <span className="font-normal text-slate-500">
+                            agreed
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          Paid{" "}
+                          {tenant.depositPaid != null
+                            ? formatInr(tenant.depositPaid)
+                            : "—"}
+                          {tenant.depositPaidDate
+                            ? ` · ${tenant.depositPaidDate}`
+                            : ""}
+                        </p>
+                        {tenant.depositAmount != null &&
+                        tenant.depositPaid != null &&
+                        tenant.depositAmount > tenant.depositPaid ? (
+                          <p className="text-xs font-semibold text-amber-800">
+                            Balance{" "}
+                            {formatInr(
+                              tenant.depositAmount - tenant.depositPaid
+                            )}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-500">—</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
                       Status
                     </p>
                     <span
@@ -152,6 +195,23 @@ export default async function TenantsPage() {
                         {tenant.tenancyStatus ? "No active occupancy" : "—"}
                       </p>
                     )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
+                      Details
+                    </p>
+                    <TenantDetailsEditor
+                      tenantId={tenant.id}
+                      fullName={tenant.fullName}
+                      phone={tenant.phone}
+                      email={tenant.email}
+                      monthlyRent={tenant.monthlyRent}
+                      depositAmount={tenant.depositAmount}
+                      depositPaid={tenant.depositPaid}
+                      depositPaidDate={tenant.depositPaidDate}
+                      tenancyId={tenant.tenancyId}
+                      hasActiveTenancy={tenant.hasActiveTenancy}
+                    />
                   </div>
                 </li>
               ))}

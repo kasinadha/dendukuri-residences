@@ -8,10 +8,18 @@ import {
   createTenantPortalLogin,
   resetTenantPortalPassword,
 } from "@/lib/tenant-auth";
+import { updateTenantProfile, updateTenantTenancyTerms } from "@/lib/tenants";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asOptionalNumber(formData: FormData, key: string): number | null {
+  const raw = asString(formData, key);
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 function revalidateOccupancy() {
@@ -81,5 +89,43 @@ export async function resetTenantPasswordAction(formData: FormData) {
   });
 
   if (result.ok) revalidatePath("/admin/tenants");
+  return result;
+}
+
+export async function updateTenantDetailsAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+
+  const result = await updateTenantProfile(supabase, {
+    tenantId: asString(formData, "tenant_id"),
+    fullName: asString(formData, "full_name"),
+    phone: asString(formData, "phone") || null,
+    email: asString(formData, "email") || null,
+  });
+
+  if (result.ok) {
+    revalidateOccupancy();
+  }
+  return result;
+}
+
+export async function updateTenantTermsAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tenancyId = asString(formData, "tenancy_id");
+  if (!tenancyId) return { ok: false as const, error: "Missing tenancy." };
+
+  const result = await updateTenantTenancyTerms(supabase, {
+    tenancyId,
+    monthlyRent: asOptionalNumber(formData, "monthly_rent"),
+    depositAmount: asOptionalNumber(formData, "deposit_amount"),
+    depositPaid: asOptionalNumber(formData, "deposit_paid"),
+    depositPaidDate: asString(formData, "deposit_paid_date") || null,
+    termsConfirmed: asString(formData, "terms_confirmed") === "yes",
+  });
+
+  if (result.ok) {
+    revalidateOccupancy();
+    revalidatePath("/admin/payments");
+    revalidatePath("/admin/flats");
+  }
   return result;
 }
