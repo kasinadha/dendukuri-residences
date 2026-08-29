@@ -13,11 +13,74 @@ export type PaymentAccount = {
   notes: string | null;
 };
 
+export const DEFAULT_JOINT_QR_URL = "/upi/default-receive-qr.png";
+
+export type PaymentAccountUpiDefaults = {
+  upiId: string | null;
+  upiQrUrl: string | null;
+  accountId: string | null;
+};
+
+export function getJointPaymentAccount(
+  accounts: PaymentAccount[]
+): PaymentAccount | null {
+  return accounts.find((account) => account.code === "joint") ?? null;
+}
+
+export function jointAccountUpiDefaults(
+  accounts: PaymentAccount[]
+): PaymentAccountUpiDefaults {
+  const joint = getJointPaymentAccount(accounts);
+  return {
+    accountId: joint?.id ?? null,
+    upiId: joint?.upiId ?? null,
+    upiQrUrl: joint?.upiQrUrl?.trim() || DEFAULT_JOINT_QR_URL,
+  };
+}
+
+export async function loadJointUpiDefaults(
+  supabase: SupabaseClient
+): Promise<PaymentAccountUpiDefaults> {
+  const { accounts } = await listPaymentAccounts(supabase);
+  return jointAccountUpiDefaults(accounts);
+}
+
 export type PaymentAccountOption = {
   id: string;
   label: string;
   code: string;
 };
+
+const PAYMENT_ACCOUNT_SEEDS = [
+  {
+    code: "joint",
+    label: "Joint account",
+    sort_order: 1,
+    notes: "Shared Canara / joint receiving account",
+    upi_qr_url: DEFAULT_JOINT_QR_URL,
+  },
+  {
+    code: "kasi",
+    label: "Kasi",
+    sort_order: 2,
+    notes: "Kasinadha account",
+    upi_qr_url: null,
+  },
+  {
+    code: "kanthu",
+    label: "Kanthu",
+    sort_order: 3,
+    notes: "Kanthu account",
+    upi_qr_url: null,
+  },
+  {
+    code: "pratyu",
+    label: "Pratyu",
+    sort_order: 4,
+    notes: "Pratyu account",
+    upi_qr_url: null,
+  },
+] as const;
 
 function normalizeUpi(value: string | null | undefined): string | null {
   const trimmed = value?.trim().toLowerCase() ?? "";
@@ -54,10 +117,41 @@ function mapRow(row: {
   };
 }
 
+export type ListPaymentAccountsResult = {
+  accounts: PaymentAccount[];
+  error: string | null;
+  tableMissing: boolean;
+};
+
+function isMissingTableError(message: string): boolean {
+  return /payment_accounts|relation .* does not exist|schema cache/i.test(
+    message
+  );
+}
+
+export async function ensurePaymentAccounts(
+  supabase: SupabaseClient
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await supabase.from("payment_accounts").upsert(
+    PAYMENT_ACCOUNT_SEEDS.map((seed) => ({
+      code: seed.code,
+      label: seed.label,
+      sort_order: seed.sort_order,
+      notes: seed.notes,
+      upi_qr_url: seed.upi_qr_url,
+      is_active: true,
+    })),
+    { onConflict: "code" }
+  );
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function listPaymentAccounts(
   supabase: SupabaseClient,
   options?: { activeOnly?: boolean }
-): Promise<PaymentAccount[]> {
+): Promise<ListPaymentAccountsResult> {
   let query = supabase
     .from("payment_accounts")
     .select(
@@ -71,9 +165,19 @@ export async function listPaymentAccounts(
   }
 
   const { data, error } = await query;
-  if (error || !data) return [];
+  if (error) {
+    return {
+      accounts: [],
+      error: error.message,
+      tableMissing: isMissingTableError(error.message),
+    };
+  }
 
-  return data.map(mapRow);
+  return {
+    accounts: (data ?? []).map(mapRow),
+    error: null,
+    tableMissing: false,
+  };
 }
 
 export function toPaymentAccountOptions(
@@ -170,11 +274,13 @@ export async function resolveReceiverAccountId(
     return input.flatPaymentAccountId.trim();
   }
 
-  const accounts = await listPaymentAccounts(supabase);
+  const { accounts } = await listPaymentAccounts(supabase);
   const resolved = resolvePaymentAccountFromUpi(accounts, {
     upiId: input.upiId,
     upiQrUrl: input.upiQrUrl,
     buildingWing: input.buildingWing,
   });
-  return resolved?.id ?? null;
+  if (resolved?.id) return resolved.id;
+
+  return getJointPaymentAccount(accounts)?.id ?? null;
 }

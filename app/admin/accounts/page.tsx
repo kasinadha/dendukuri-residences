@@ -5,7 +5,9 @@ import { listPaymentAccounts } from "@/lib/payment-accounts";
 
 export default async function AccountsPage() {
   const { supabase } = await requireAdmin();
-  const accounts = await listPaymentAccounts(supabase, { activeOnly: false });
+  const { accounts, error, tableMissing } = await listPaymentAccounts(supabase, {
+    activeOnly: false,
+  });
 
   return (
     <AdminLayout>
@@ -20,7 +22,11 @@ export default async function AccountsPage() {
         </p>
       </div>
 
-      <PaymentAccountsPanel accounts={accounts} />
+      <PaymentAccountsPanel
+        accounts={accounts}
+        loadError={error}
+        tableMissing={tableMissing}
+      />
     </AdminLayout>
   );
 }

@@ -78,7 +78,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
     )
     .order("created_at", { ascending: false });
 
-  const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccounts] =
+  const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
     await Promise.all([
       getRentMonthSummary(supabase, month),
       listPaymentHistory(supabase, {
@@ -93,6 +93,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
       listOwnerDueReminders(supabase),
       listPaymentAccounts(supabase),
     ]);
+
+  const paymentAccounts = paymentAccountsResult.accounts;
 
   const accountOptions = toPaymentAccountOptions(paymentAccounts);
 

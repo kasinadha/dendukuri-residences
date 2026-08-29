@@ -7,11 +7,12 @@ import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default async function WaterPage() {
   const { supabase } = await requireAdmin();
-  const [vendors, tankers, accounts] = await Promise.all([
+  const [vendors, tankers, accountsResult] = await Promise.all([
     listVendors(supabase),
     listWaterTankers(supabase),
     listPaymentAccounts(supabase),
   ]);
+  const accounts = accountsResult.accounts;
 
   return (
     <AdminLayout>

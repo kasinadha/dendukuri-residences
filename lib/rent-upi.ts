@@ -13,19 +13,28 @@ export function getRentUpiConfig(): {
   return { upiId, payeeName };
 }
 
-/** Prefer per-flat UPI/QR; fall back to global env. */
-export function resolveRentUpiDisplay(input?: {
-  upiId?: string | null;
-  upiQrUrl?: string | null;
-} | null): {
+/** Prefer per-flat UPI/QR; fall back to joint account, then global env. */
+export function resolveRentUpiDisplay(
+  input?: {
+    upiId?: string | null;
+    upiQrUrl?: string | null;
+  } | null,
+  defaults?: {
+    upiId?: string | null;
+    upiQrUrl?: string | null;
+  } | null
+): {
   upiId: string | null;
   upiQrUrl: string | null;
   payeeName: string;
 } {
   const global = getRentUpiConfig();
+  const fallbackUpiId = defaults?.upiId?.trim() || global.upiId;
+  const fallbackQrUrl = defaults?.upiQrUrl?.trim() || null;
+
   return {
-    upiId: input?.upiId?.trim() || global.upiId,
-    upiQrUrl: input?.upiQrUrl?.trim() || null,
+    upiId: input?.upiId?.trim() || fallbackUpiId,
+    upiQrUrl: input?.upiQrUrl?.trim() || fallbackQrUrl,
     payeeName: global.payeeName,
   };
 }

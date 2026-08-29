@@ -2,13 +2,17 @@
 
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updatePaymentAccountAction } from "@/app/admin/accounts/actions";
+import { updatePaymentAccountAction, ensurePaymentAccountsAction } from "@/app/admin/accounts/actions";
 import type { PaymentAccount } from "@/lib/payment-accounts";
 
 export default function PaymentAccountsPanel({
   accounts,
+  loadError,
+  tableMissing,
 }: {
   accounts: PaymentAccount[];
+  loadError?: string | null;
+  tableMissing?: boolean;
 }) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -58,6 +62,43 @@ export default function PaymentAccountsPanel({
         </p>
       ) : null}
 
+      {loadError ? (
+        <p className="mx-5 mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 sm:mx-6">
+          {tableMissing
+            ? "Payment accounts table is missing. Run supabase/migrations/20260829_building_revenue_accounts.sql and 20260829_payment_accounts_rls.sql in Supabase SQL Editor."
+            : loadError}
+        </p>
+      ) : null}
+
+      {accounts.length === 0 ? (
+        <div className="p-6">
+          <p className="text-sm text-slate-600">
+            No accounts loaded yet. If you already ran the migrations, click
+            below to create Joint, Kasi, Kanthu, and Pratyu.
+          </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              setError("");
+              setSuccess("");
+              startTransition(async () => {
+                const result = await ensurePaymentAccountsAction();
+                if (!result.ok) {
+                  setError(result.error);
+                  return;
+                }
+                setSuccess("Owner accounts created.");
+                router.refresh();
+              });
+            }}
+            className="mt-4 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {pending ? "Setting up…" : "Set up owner accounts"}
+          </button>
+        </div>
+      ) : null}
+
       <ul className="divide-y divide-slate-100">
         {accounts.map((account) => (
           <li key={account.id} className="px-5 py-5 sm:px-6">
@@ -101,7 +142,7 @@ export default function PaymentAccountsPanel({
                 <input
                   name="upi_qr_url"
                   defaultValue={account.upiQrUrl ?? ""}
-                  placeholder="/upi/joint-receive-qr.png"
+                  placeholder="/upi/default-receive-qr.png"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>

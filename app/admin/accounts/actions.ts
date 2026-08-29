@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
-import { updatePaymentAccount } from "@/lib/payment-accounts";
+import { ensurePaymentAccounts, updatePaymentAccount } from "@/lib/payment-accounts";
 import type { BuildingWing } from "@/lib/building-wing";
 
 function asString(formData: FormData, key: string): string {
@@ -33,5 +33,16 @@ export async function updatePaymentAccountAction(formData: FormData) {
     revalidatePath("/admin/payments");
   }
 
+  return result;
+}
+
+export async function ensurePaymentAccountsAction() {
+  const { supabase } = await requireAdmin();
+  const result = await ensurePaymentAccounts(supabase);
+  if (result.ok) {
+    revalidatePath("/admin/accounts");
+    revalidatePath("/admin/reports");
+    revalidatePath("/admin/payments");
+  }
   return result;
 }
