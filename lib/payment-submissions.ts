@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import { mapProofPathsToSignedUrls } from "@/lib/payment-proofs";
 import { resolveReceiverAccountId } from "@/lib/payment-accounts";
+import { insertPaymentRecord } from "@/lib/payment-record";
 import { purposeLabel, type PaymentPurpose } from "@/lib/public-pay";
 import {
   encodeBillingMonthNote,
@@ -453,26 +454,54 @@ export async function approvePaymentSubmission(
   let flatUpiQrUrl: string | null = null;
   let flatPaymentAccountId: string | null = null;
   if (submission.flat_id) {
-    const { data: flat } = await supabase
+    let flatResult = await supabase
       .from("flats")
       .select("flat_number,upi_qr_url,payment_account_id")
       .eq("id", submission.flat_id)
       .maybeSingle();
-    flatNumber = flat?.flat_number ?? null;
-    flatUpiQrUrl = flat?.upi_qr_url ?? null;
-    flatPaymentAccountId = flat?.payment_account_id ?? null;
+    if (
+      flatResult.error &&
+      /column .* does not exist|could not find.*column/i.test(
+        flatResult.error.message
+      )
+    ) {
+      flatResult = await supabase
+        .from("flats")
+        .select("flat_number,upi_qr_url")
+        .eq("id", submission.flat_id)
+        .maybeSingle();
+    }
+    flatNumber = flatResult.data?.flat_number ?? null;
+    flatUpiQrUrl = flatResult.data?.upi_qr_url ?? null;
+    flatPaymentAccountId =
+      (flatResult.data as { payment_account_id?: string | null } | null)
+        ?.payment_account_id ?? null;
   } else if (tenancyId) {
-    const { data: tenancy } = await supabase
+    let tenancyResult = await supabase
       .from("tenancies")
       .select("flats(flat_number,upi_qr_url,payment_account_id)")
       .eq("id", tenancyId)
       .maybeSingle();
-    const flat = Array.isArray(tenancy?.flats)
-      ? tenancy?.flats[0]
-      : tenancy?.flats;
+    if (
+      tenancyResult.error &&
+      /column .* does not exist|could not find.*column/i.test(
+        tenancyResult.error.message
+      )
+    ) {
+      tenancyResult = await supabase
+        .from("tenancies")
+        .select("flats(flat_number,upi_qr_url)")
+        .eq("id", tenancyId)
+        .maybeSingle();
+    }
+    const flat = Array.isArray(tenancyResult.data?.flats)
+      ? tenancyResult.data?.flats[0]
+      : tenancyResult.data?.flats;
     flatNumber = flat?.flat_number ?? null;
     flatUpiQrUrl = flat?.upi_qr_url ?? null;
-    flatPaymentAccountId = flat?.payment_account_id ?? null;
+    flatPaymentAccountId =
+      (flat as { payment_account_id?: string | null } | null | undefined)
+        ?.payment_account_id ?? null;
   }
 
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
@@ -514,55 +543,68 @@ export async function approvePaymentSubmission(
     paymentPayload.receiver_account_id = receiverAccountId;
   }
 
-  const { data: payment, error: paymentError } = await supabase
-    .from("payments")
-    .insert(paymentPayload)
-    .select("id")
-    .single();
-
-  if (paymentError || !payment) {
-    return {
-      ok: false,
-      error: paymentError?.message ?? "Could not create payment.",
-    };
+  const paymentResult = await insertPaymentRecord(supabase, paymentPayload);
+  if (!paymentResult.ok) {
+    return { ok: false, error: paymentResult.error };
   }
+  const paymentId = paymentResult.paymentId;
 
   try {
-    const receipt = await insertReceiptWithUniqueNumber(supabase, payment.id);
+    const receipt = await insertReceiptWithUniqueNumber(supabase, paymentId);
 
-    const { error: updateError } = await supabase
+    const updatePayload: Record<string, unknown> = {
+      status: "approved",
+      payment_id: paymentId,
+      tenancy_id: tenancyId,
+      admin_notes: input.adminNotes?.trim() || null,
+      reviewed_by: input.reviewedBy,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (receiverAccountId) {
+      updatePayload.receiver_account_id = receiverAccountId;
+    }
+
+    let { error: updateError } = await supabase
       .from("payment_submissions")
-      .update({
-        status: "approved",
-        payment_id: payment.id,
-        tenancy_id: tenancyId,
-        receiver_account_id: receiverAccountId,
-        admin_notes: input.adminNotes?.trim() || null,
-        reviewed_by: input.reviewedBy,
-        reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", input.id)
       .eq("status", "pending");
 
+    if (
+      updateError &&
+      receiverAccountId &&
+      /column .* does not exist|could not find.*column/i.test(updateError.message)
+    ) {
+      const { receiver_account_id: _omit, ...withoutReceiver } = updatePayload;
+      const retry = await supabase
+        .from("payment_submissions")
+        .update(withoutReceiver)
+        .eq("id", input.id)
+        .eq("status", "pending");
+      updateError = retry.error;
+    }
+
     if (updateError) {
-      return { ok: false, error: updateError.message };
+      return {
+        ok: false,
+        error: `Receipt ${receipt.receipt_number} was created, but submission update failed: ${updateError.message}`,
+      };
     }
 
     return {
       ok: true,
-      paymentId: payment.id,
+      paymentId,
       receiptId: receipt.id,
       receiptNumber: receipt.receipt_number,
     };
   } catch (err) {
-    await supabase.from("payments").delete().eq("id", payment.id);
+    await supabase.from("payments").delete().eq("id", paymentId);
+    const detail =
+      err instanceof Error ? err.message : "unknown receipt error";
     return {
       ok: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : "Receipt creation failed; payment rolled back.",
+      error: `Receipt creation failed (${detail}). Payment was rolled back.`,
     };
   }
 }

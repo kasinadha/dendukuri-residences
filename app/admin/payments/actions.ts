@@ -11,6 +11,11 @@ import { computePaymentStatus } from "@/lib/payment-status";
 import { resolveReceiverAccountId } from "@/lib/payment-accounts";
 import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import {
+  fetchTenancyForPayment,
+  insertPaymentRecord,
+  unwrapFlat,
+} from "@/lib/payment-record";
+import {
   encodeBillingMonthNote,
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
@@ -101,22 +106,11 @@ export async function recordRentPayment(
     return { ok: false, error: "Amount paid must be greater than zero." };
   }
 
-  const { data: tenancy, error: tenancyError } = await supabase
-    .from("tenancies")
-    .select(
-      `
-      id,
-      status,
-      monthly_rent,
-      flats ( flat_number, upi_id, upi_qr_url, payment_account_id )
-    `
-    )
-    .eq("id", tenancyId)
-    .maybeSingle();
-
-  if (tenancyError || !tenancy) {
-    return { ok: false, error: "Tenancy not found." };
+  const tenancyResult = await fetchTenancyForPayment(supabase, tenancyId);
+  if (!tenancyResult.ok) {
+    return { ok: false, error: tenancyResult.error };
   }
+  const { tenancy } = tenancyResult;
 
   if (!isActiveTenancyStatus(tenancy.status)) {
     return {
@@ -130,12 +124,12 @@ export async function recordRentPayment(
     ? "waived"
     : computePaymentStatus(amountDue, amountPaid);
 
-  const flat = Array.isArray(tenancy.flats) ? tenancy.flats[0] : tenancy.flats;
+  const flat = unwrapFlat(tenancy.flats);
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId: explicitReceiverAccountId,
     upiId: flat?.upi_id,
     upiQrUrl: flat?.upi_qr_url,
-    flatPaymentAccountId: flat?.payment_account_id,
+    flatPaymentAccountId: flat?.payment_account_id ?? null,
     buildingWing: buildingWingFromFlatNumber(flat?.flat_number),
   });
 
@@ -155,23 +149,11 @@ export async function recordRentPayment(
     paymentPayload.receiver_account_id = receiverAccountId;
   }
 
-  const { data: payment, error: paymentError } = await supabase
-    .from("payments")
-    .insert(paymentPayload)
-    .select("id")
-    .single();
-
-  if (paymentError || !payment) {
-    const msg = paymentError?.message ?? "Could not record payment.";
-    if (/amount_due|column .* does not exist/i.test(msg)) {
-      return {
-        ok: false,
-        error:
-          "Database needs Phase 11 migration. Run supabase/migrations/20260815_phase11_rent_payment_receipts.sql",
-      };
-    }
-    return { ok: false, error: msg };
+  const paymentResult = await insertPaymentRecord(supabase, paymentPayload);
+  if (!paymentResult.ok) {
+    return { ok: false, error: paymentResult.error };
   }
+  const paymentId = paymentResult.paymentId;
 
   // Receipt only when money was collected (or waived acknowledgement)
   if (!waived && amountPaid <= 0) {
@@ -179,14 +161,14 @@ export async function recordRentPayment(
     revalidatePath("/admin");
     return {
       ok: true,
-      paymentId: payment.id,
+      paymentId,
       receiptId: "",
       receiptNumber: "(no receipt — zero paid)",
     };
   }
 
   try {
-    const receipt = await insertReceiptWithUniqueNumber(supabase, payment.id);
+    const receipt = await insertReceiptWithUniqueNumber(supabase, paymentId);
 
     revalidatePath("/admin/payments");
     revalidatePath("/admin/receipts");
@@ -196,19 +178,18 @@ export async function recordRentPayment(
 
     return {
       ok: true,
-      paymentId: payment.id,
+      paymentId,
       receiptId: receipt.id,
       receiptNumber: receipt.receipt_number,
     };
   } catch (error) {
-    await supabase.from("payments").delete().eq("id", payment.id);
+    await supabase.from("payments").delete().eq("id", paymentId);
 
+    const detail =
+      error instanceof Error ? error.message : "unknown receipt error";
     return {
       ok: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Payment saved but receipt creation failed; payment was rolled back.",
+      error: `Receipt creation failed (${detail}). Payment was rolled back. If this persists, check receipts table RLS and run supabase/migrations/20260808_receipt_number_uniqueness.sql.`,
     };
   }
 }
