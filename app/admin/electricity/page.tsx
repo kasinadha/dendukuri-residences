@@ -1,17 +1,22 @@
 import AdminLayout from "@/components/admin/AdminLayout";
+import ElectricityBillingPanel from "@/components/admin/ElectricityBillingPanel";
 import ElectricityForm from "@/components/admin/ElectricityForm";
 import { requireAdmin } from "@/lib/auth";
 import {
+  listElectricityBillingRuns,
   listElectricityReadings,
   listFlatsForSelect,
+  listOccupiedFlatsForBilling,
 } from "@/lib/electricity";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default async function ElectricityPage() {
   const { supabase } = await requireAdmin();
-  const [flats, readings] = await Promise.all([
+  const [flats, occupiedFlats, readings, billingRuns] = await Promise.all([
     listFlatsForSelect(supabase),
+    listOccupiedFlatsForBilling(supabase),
     listElectricityReadings(supabase),
+    listElectricityBillingRuns(supabase),
   ]);
 
   return (
@@ -21,10 +26,46 @@ export default async function ElectricityPage() {
         <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
           Electricity
         </h2>
-        <p className="mt-2 max-w-2xl text-slate-500">
-          Meter readings, computed units, and bill amounts per flat.
+        <p className="mt-2 max-w-3xl text-slate-500">
+          Enter building + flat cumulative meter readings to auto-calculate dues
+          per flat: (flat units + common share) × ₹8 + ₹120/kW × sanctioned kW
+          (default 2 kW), plus 9% service charge.
         </p>
       </div>
+
+      <div className="mt-8">
+        <ElectricityBillingPanel occupiedFlats={occupiedFlats} />
+      </div>
+
+      {billingRuns.length > 0 ? (
+        <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+            <h3 className="text-lg font-bold text-slate-900">Billing runs</h3>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {billingRuns.map((run) => (
+              <li
+                key={run.id}
+                className="flex flex-col gap-1 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+              >
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    {run.billingMonth} · {formatDisplayDate(run.readingDate)}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    Building {run.buildingUnits} units · common{" "}
+                    {run.commonAreaUnits.toFixed(2)} · {run.occupiedFlatsCount}{" "}
+                    flats · ₹{run.ratePerUnit}/unit
+                  </p>
+                </div>
+                <p className="font-semibold text-slate-900">
+                  {formatInr(run.totalBilled)} billed
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <ElectricityForm flats={flats} />
@@ -43,9 +84,14 @@ export default async function ElectricityPage() {
                     <div>
                       <p className="font-semibold text-slate-900">
                         Flat {row.flatNumber}
+                        {row.billingMonth ? ` · ${row.billingMonth}` : ""}
                       </p>
                       <p className="text-sm text-slate-500">
-                        {formatDisplayDate(row.readingDate)} · {row.units} units
+                        {formatDisplayDate(row.readingDate)} · {row.units} flat
+                        units
+                        {row.commonShareUnits != null
+                          ? ` + ${row.commonShareUnits.toFixed(2)} common`
+                          : ""}
                         · {row.previousReading} → {row.currentReading}
                       </p>
                     </div>

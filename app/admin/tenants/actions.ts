@@ -119,6 +119,11 @@ export async function updateTenantTermsAction(formData: FormData) {
     depositAmount: asOptionalNumber(formData, "deposit_amount"),
     depositPaid: asOptionalNumber(formData, "deposit_paid"),
     depositPaidDate: asString(formData, "deposit_paid_date") || null,
+    maintenanceCharge: asOptionalNumber(formData, "maintenance_charge"),
+    carParkingCharge: asOptionalNumber(formData, "car_parking_charge"),
+    washingMachineCharge: asOptionalNumber(formData, "washing_machine_charge"),
+    otherMonthlyCharge: asOptionalNumber(formData, "other_monthly_charge"),
+    otherChargesNotes: asString(formData, "other_charges_notes") || null,
     termsConfirmed: asString(formData, "terms_confirmed") === "yes",
   });
 

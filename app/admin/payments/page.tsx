@@ -24,10 +24,8 @@ import {
   listOwnerDueReminders,
   listUnpaidRentReminders,
 } from "@/lib/reminders";
-import {
-  getRentMonthSummary,
-  listPaymentHistory,
-} from "@/lib/rent-month";
+import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
+import { listPaymentHistory } from "@/lib/rent-month";
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
@@ -80,7 +78,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
 
   const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
     await Promise.all([
-      getRentMonthSummary(supabase, month),
+      getMonthlyDuesSummary(supabase, month),
       listPaymentHistory(supabase, {
         month,
         flat,
@@ -153,13 +151,13 @@ export default async function PaymentsPage({ searchParams }: Props) {
             detail: filterMonth,
           },
           {
-            title: "Rent expected",
-            value: formatInr(monthSummary.rentExpected),
-            detail: "Active tenancies only",
+            title: "Dues expected",
+            value: formatInr(monthSummary.totalExpected),
+            detail: "Rent + monthly charges",
           },
           {
-            title: "Rent collected",
-            value: formatInr(monthSummary.rentCollected),
+            title: "Collected",
+            value: formatInr(monthSummary.totalCollected),
             detail: `${monthSummary.paidTenants} paid · ${monthSummary.partialTenants} partial`,
           },
           {
@@ -236,8 +234,11 @@ export default async function PaymentsPage({ searchParams }: Props) {
                       Flat {row.flatNumber} · {row.tenantName}
                     </p>
                     <p className="mt-1 text-sm text-slate-500">
-                      Due {formatInr(row.amountDue)} · Paid{" "}
+                      Due {formatInr(row.totalDue)} · Paid{" "}
                       {formatInr(row.amountPaid)}
+                      {row.chargesDue > 0
+                        ? ` (rent ${formatInr(row.rentDue)} + charges ${formatInr(row.chargesDue)})`
+                        : ""}
                       {row.outstanding > 0
                         ? ` · Outstanding ${formatInr(row.outstanding)}`
                         : ""}

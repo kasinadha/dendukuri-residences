@@ -19,7 +19,7 @@ import {
   listOwnerDueReminders,
   listUnpaidRentReminders,
 } from "@/lib/reminders";
-import { getRentMonthSummary } from "@/lib/rent-month";
+import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
 
 function currentMonthLabel() {
   return new Intl.DateTimeFormat("en-IN", {
@@ -33,7 +33,7 @@ export default async function AdminDashboard() {
   const { supabase } = await requireAdmin();
   const [flats, rentMonth, unpaidReminders, ownerDues] = await Promise.all([
     listFlatsForAdmin(supabase),
-    getRentMonthSummary(supabase),
+    getMonthlyDuesSummary(supabase),
     listUnpaidRentReminders(supabase),
     listOwnerDueReminders(supabase),
   ]);
@@ -61,14 +61,14 @@ export default async function AdminDashboard() {
       icon: Users,
     },
     {
-      title: "Rent Expected",
-      value: formatInr(rentMonth.rentExpected),
-      detail: `${monthLabel} · active tenancies`,
+      title: "Monthly Dues",
+      value: formatInr(rentMonth.totalExpected),
+      detail: `${monthLabel} · rent + charges`,
       icon: IndianRupee,
     },
     {
-      title: "Rent Collected",
-      value: formatInr(rentMonth.rentCollected),
+      title: "Collected",
+      value: formatInr(rentMonth.totalCollected),
       detail: `Outstanding ${formatInr(rentMonth.outstanding)}`,
       icon: CircleAlert,
     },

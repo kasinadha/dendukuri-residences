@@ -7,6 +7,7 @@ import {
   updateTenantTermsAction,
 } from "@/app/admin/tenants/actions";
 import { formatInr } from "@/lib/receipts";
+import type { TenantMonthlyCharges } from "@/lib/tenant-charges";
 
 type Props = {
   tenantId: string;
@@ -17,6 +18,7 @@ type Props = {
   depositAmount: number | null;
   depositPaid: number | null;
   depositPaidDate: string | null;
+  monthlyCharges: TenantMonthlyCharges | null;
   tenancyId: string | null;
   hasActiveTenancy: boolean;
 };
@@ -47,6 +49,7 @@ export default function TenantDetailsEditor({
   depositAmount,
   depositPaid,
   depositPaidDate,
+  monthlyCharges,
   tenancyId,
   hasActiveTenancy,
 }: Props) {
@@ -97,6 +100,11 @@ export default function TenantDetailsEditor({
     const nextDeposit = formData.get("deposit_amount");
     const nextPaid = formData.get("deposit_paid");
     const nextPaidDate = formData.get("deposit_paid_date");
+    const nextMaintenance = formData.get("maintenance_charge");
+    const nextParking = formData.get("car_parking_charge");
+    const nextWasher = formData.get("washing_machine_charge");
+    const nextOther = formData.get("other_monthly_charge");
+    const nextOtherNotes = formData.get("other_charges_notes");
 
     const rentChanged =
       String(nextRent ?? "") !==
@@ -109,19 +117,42 @@ export default function TenantDetailsEditor({
       (depositPaid != null ? String(depositPaid) : "");
     const dateChanged =
       String(nextPaidDate ?? "") !== (depositPaidDate ?? "");
+    const maintenanceChanged =
+      String(nextMaintenance ?? "") !==
+      String(monthlyCharges?.maintenanceCharge ?? 0);
+    const parkingChanged =
+      String(nextParking ?? "") !==
+      String(monthlyCharges?.carParkingCharge ?? 0);
+    const washerChanged =
+      String(nextWasher ?? "") !==
+      String(monthlyCharges?.washingMachineCharge ?? 0);
+    const otherChanged =
+      String(nextOther ?? "") !==
+      String(monthlyCharges?.otherMonthlyCharge ?? 0);
+    const otherNotesChanged =
+      String(nextOtherNotes ?? "") !==
+      (monthlyCharges?.otherChargesNotes ?? "");
 
     const hasFinancialChange =
-      rentChanged || depositChanged || paidChanged || dateChanged;
+      rentChanged ||
+      depositChanged ||
+      paidChanged ||
+      dateChanged ||
+      maintenanceChanged ||
+      parkingChanged ||
+      washerChanged ||
+      otherChanged ||
+      otherNotesChanged;
 
     if (!hasFinancialChange) {
-      setSuccess("No changes to rent or advance.");
+      setSuccess("No changes to tenancy terms.");
       setTermsOpen(false);
       setTermsConfirmed(false);
       return;
     }
 
     if (!termsConfirmed) {
-      setError("Check the confirmation box before saving rent or advance.");
+      setError("Check the confirmation box before saving locked terms.");
       return;
     }
 
@@ -147,6 +178,33 @@ export default function TenantDetailsEditor({
               typeof nextPaidDate === "string" ? nextPaidDate : null
             )}`
           : null,
+        maintenanceChanged
+          ? `• Maintenance: ${describeAmount(monthlyCharges?.maintenanceCharge ?? 0)} → ${describeAmount(
+              nextMaintenance ? Number(nextMaintenance) : 0
+            )}`
+          : null,
+        parkingChanged
+          ? `• Car parking: ${describeAmount(monthlyCharges?.carParkingCharge ?? 0)} → ${describeAmount(
+              nextParking ? Number(nextParking) : 0
+            )}`
+          : null,
+        washerChanged
+          ? `• Washing machine: ${describeAmount(monthlyCharges?.washingMachineCharge ?? 0)} → ${describeAmount(
+              nextWasher ? Number(nextWasher) : 0
+            )}`
+          : null,
+        otherChanged
+          ? `• Other charges: ${describeAmount(monthlyCharges?.otherMonthlyCharge ?? 0)} → ${describeAmount(
+              nextOther ? Number(nextOther) : 0
+            )}`
+          : null,
+        otherNotesChanged
+          ? `• Other notes: ${monthlyCharges?.otherChargesNotes || "—"} → ${
+              typeof nextOtherNotes === "string" && nextOtherNotes.trim()
+                ? nextOtherNotes.trim()
+                : "—"
+            }`
+          : null,
       ].filter(Boolean);
 
     const ok = window.confirm(`${lines.join("\n")}\n\nSave these changes?`);
@@ -159,7 +217,7 @@ export default function TenantDetailsEditor({
         setError(result.error);
         return;
       }
-      setSuccess("Rent and advance updated.");
+      setSuccess("Tenancy terms updated.");
       setTermsOpen(false);
       setTermsConfirmed(false);
       router.refresh();
@@ -181,9 +239,31 @@ export default function TenantDetailsEditor({
             Paid {describeAmount(depositPaid)}
             {depositPaidDate ? ` · ${formatShortDate(depositPaidDate)}` : ""}
           </p>
+          {monthlyCharges ? (
+            <>
+              <p className="mt-2 font-semibold text-slate-800">Monthly charges</p>
+              <p>
+                Total {formatInr(monthlyCharges.totalMonthlyCharges)}/mo
+              </p>
+              <p>
+                Maint {describeAmount(monthlyCharges.maintenanceCharge)} · Park{" "}
+                {describeAmount(monthlyCharges.carParkingCharge)} · Washer{" "}
+                {describeAmount(monthlyCharges.washingMachineCharge)}
+              </p>
+              {(monthlyCharges.otherMonthlyCharge > 0 ||
+                monthlyCharges.otherChargesNotes) && (
+                <p>
+                  Other {describeAmount(monthlyCharges.otherMonthlyCharge)}
+                  {monthlyCharges.otherChargesNotes
+                    ? ` · ${monthlyCharges.otherChargesNotes}`
+                    : ""}
+                </p>
+              )}
+            </>
+          ) : null}
           {balance != null && balance > 0 ? (
             <p className="mt-1 font-semibold text-amber-800">
-              Balance {formatInr(balance)}
+              Advance balance {formatInr(balance)}
             </p>
           ) : null}
         </div>
@@ -215,7 +295,7 @@ export default function TenantDetailsEditor({
             }}
             className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
           >
-            {termsOpen ? "Close" : "Edit rent & advance"}
+            {termsOpen ? "Close" : "Edit terms & charges"}
           </button>
         ) : null}
       </div>
@@ -291,7 +371,7 @@ export default function TenantDetailsEditor({
           className="rounded-xl border border-amber-200 bg-amber-50/60 p-3"
         >
           <p className="text-xs font-semibold text-amber-950">
-            Rent & advance (locked — edit only when necessary)
+            Rent, advance & monthly charges (locked)
           </p>
           <p className="mt-1 text-xs text-amber-900/80">
             Changes are recorded on the active tenancy. You must confirm before
@@ -354,6 +434,72 @@ export default function TenantDetailsEditor({
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
               />
             </label>
+            <p className="text-xs font-semibold text-slate-700">
+              Monthly charges (₹/month)
+            </p>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Maintenance
+              </span>
+              <input
+                type="number"
+                name="maintenance_charge"
+                min={0}
+                step={1}
+                defaultValue={String(monthlyCharges?.maintenanceCharge ?? 0)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Car parking
+              </span>
+              <input
+                type="number"
+                name="car_parking_charge"
+                min={0}
+                step={1}
+                defaultValue={String(monthlyCharges?.carParkingCharge ?? 0)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Washing machine
+              </span>
+              <input
+                type="number"
+                name="washing_machine_charge"
+                min={0}
+                step={1}
+                defaultValue={String(monthlyCharges?.washingMachineCharge ?? 0)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Other monthly
+              </span>
+              <input
+                type="number"
+                name="other_monthly_charge"
+                min={0}
+                step={1}
+                defaultValue={String(monthlyCharges?.otherMonthlyCharge ?? 0)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Other charges note (optional)
+              </span>
+              <input
+                name="other_charges_notes"
+                defaultValue={monthlyCharges?.otherChargesNotes ?? ""}
+                placeholder="e.g. extra amenity"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
             <label className="flex items-start gap-2 text-xs text-slate-700">
               <input
                 type="checkbox"
@@ -362,7 +508,7 @@ export default function TenantDetailsEditor({
                 className="mt-0.5"
               />
               <span>
-                I confirm these rent/advance changes are intentional and
+                I confirm these tenancy term changes are intentional and
                 necessary.
               </span>
             </label>
@@ -379,7 +525,7 @@ export default function TenantDetailsEditor({
             disabled={pending}
             className="mt-3 rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
           >
-            {pending ? "Saving…" : "Save rent & advance"}
+            {pending ? "Saving…" : "Save terms & charges"}
           </button>
         </form>
       ) : null}
