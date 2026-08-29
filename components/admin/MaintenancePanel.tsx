@@ -13,6 +13,7 @@ import {
 } from "@/lib/expense-location";
 import type { BuildingWing } from "@/lib/building-wing";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
+import { formatActionError } from "@/lib/format-action-error";
 
 type RequestRow = {
   id: string;
@@ -51,17 +52,22 @@ export default function MaintenancePanel({
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     startTransition(async () => {
-      const result = await createMaintenanceAction(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await createMaintenanceAction(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSuccess("Request created.");
+        form.reset();
+        setBuilding("");
+        router.refresh();
+      } catch (err) {
+        setError(formatActionError(err));
       }
-      setSuccess("Request created.");
-      event.currentTarget.reset();
-      setBuilding("");
-      router.refresh();
     });
   }
 
@@ -70,12 +76,16 @@ export default function MaintenancePanel({
     formData.set("id", id);
     formData.set("status", status);
     startTransition(async () => {
-      const result = await updateMaintenanceStatusAction(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await updateMaintenanceStatusAction(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        router.refresh();
+      } catch (err) {
+        setError(formatActionError(err));
       }
-      router.refresh();
     });
   }
 

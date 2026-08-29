@@ -37,11 +37,15 @@ function asString(formData: FormData, key: string): string {
 
 export async function approvePaymentSubmissionAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
+  const amountRaw = asString(formData, "amount");
+  const amount = amountRaw ? Number(amountRaw) : null;
   const result = await approvePaymentSubmission(supabase, {
     id: asString(formData, "id"),
     adminNotes: asString(formData, "admin_notes") || null,
     reviewedBy: user.id,
     receiverAccountId: asString(formData, "receiver_account_id") || null,
+    amount:
+      amount != null && Number.isFinite(amount) && amount > 0 ? amount : null,
   });
   if (result.ok) {
     revalidatePath("/admin/payments");

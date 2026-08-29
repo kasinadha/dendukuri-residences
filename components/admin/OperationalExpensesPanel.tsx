@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createOperationalExpenseAction } from "@/app/admin/expenses/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
 import ExpenseLocationFields from "@/components/admin/ExpenseLocationFields";
+import { formatActionError } from "@/lib/format-action-error";
 import { formatExpenseLocation } from "@/lib/expense-location";
 import type { FlatLocationOption } from "@/lib/expense-location";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
@@ -47,16 +48,21 @@ export default function OperationalExpensesPanel({
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     startTransition(async () => {
-      const result = await createOperationalExpenseAction(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await createOperationalExpenseAction(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSuccess("Expense saved.");
+        form.reset();
+        router.refresh();
+      } catch (err) {
+        setError(formatActionError(err));
       }
-      setSuccess("Expense saved.");
-      event.currentTarget.reset();
-      router.refresh();
     });
   }
 

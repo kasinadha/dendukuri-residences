@@ -98,9 +98,17 @@ export default function PublicPayForm() {
       setError("Look up your flat number first.");
       return;
     }
-    const formData = new FormData(event.currentTarget);
+    const amountRaw = amount.trim();
+    const amountNum = Number(amountRaw);
+    if (!amountRaw || !Number.isFinite(amountNum) || amountNum <= 0) {
+      setError("Enter a valid amount.");
+      return;
+    }
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     formData.set("flat_number", flat.flatNumber);
     formData.set("purpose", purpose);
+    formData.set("amount", amountRaw);
     startTransition(async () => {
       try {
         const result = await submitPublicPayClaimAction(formData);
@@ -111,7 +119,7 @@ export default function PublicPayForm() {
         setSuccess(
           "Submitted. The owner will review your UTR. A receipt is only created after approval."
         );
-        event.currentTarget?.reset();
+        form.reset();
         setAmount("");
         setBillingMonth(currentBillingMonthKey());
       } catch (err) {
@@ -141,7 +149,18 @@ export default function PublicPayForm() {
               required
               placeholder="e.g. C201"
               value={flatInput}
-              onChange={(e) => setFlatInput(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setFlatInput(next);
+                if (
+                  flat &&
+                  next.trim().toUpperCase() !== flat.flatNumber.toUpperCase()
+                ) {
+                  setFlat(null);
+                  setAmount("");
+                  setSuccess("");
+                }
+              }}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm uppercase"
             />
           </label>
@@ -162,7 +181,10 @@ export default function PublicPayForm() {
       </form>
 
       {flat ? (
-        <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <div
+          key={flat.flatId}
+          className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]"
+        >
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="text-lg font-bold text-slate-900">2. Pay via UPI</h2>
             <p className="mt-1 text-sm text-slate-500">
@@ -263,6 +285,7 @@ export default function PublicPayForm() {
             </p>
 
             <input type="hidden" name="purpose" value={purpose} />
+            <input type="hidden" name="amount" value={amount} />
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <label className="block">
@@ -315,22 +338,14 @@ export default function PublicPayForm() {
                   />
                 </label>
               )}
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-slate-700">
-                  Amount paid (₹)
+              <p className="block text-sm text-slate-600 sm:col-span-2">
+                Amount submitted:{" "}
+                <span className="font-semibold text-slate-900">
+                  {amount && Number(amount) > 0 ? `₹${amount}` : "—"}
                 </span>
-                <input
-                  type="number"
-                  name="amount"
-                  required
-                  min="1"
-                  step="1"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="Enter amount"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-                />
-              </label>
+                {" · "}
+                Enter or update the amount in step 2 before submitting.
+              </p>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">
                   Payment date

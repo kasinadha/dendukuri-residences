@@ -36,13 +36,19 @@ export default async function WaterPage() {
         rows={tankers.map((row) => ({
           id: row.id,
           deliveryDate: formatDisplayDate(row.deliveryDate),
+          deliveryDateIso: row.deliveryDate,
+          amount: row.amount,
           amountLabel: row.amount != null ? formatInr(row.amount) : "—",
+          vendorId: row.vendorId,
           vendorName: row.vendorName ?? "No vendor",
           paymentStatus: row.paymentStatus ?? "—",
+          buildingWing: row.buildingWing,
+          flatId: row.flatId,
           locationLabel: formatExpenseLocation({
             buildingWing: row.buildingWing,
             flatNumber: row.flatNumber,
           }),
+          payerAccountId: row.payerAccountId,
           payerLabel: row.payerAccountLabel,
           notes: row.notes,
         }))}

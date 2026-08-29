@@ -1,4 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  EXPENSE_LOCATION_MIGRATION_HINT,
+  isMissingColumnError,
+  PAYMENT_ACCOUNTS_MIGRATION_HINT,
+} from "@/lib/db-errors";
 import { endTenancy, transferTenancy } from "@/lib/tenancies";
 import type { ExpenseBuildingWing } from "@/lib/expense-location";
 
@@ -90,33 +95,9 @@ export async function createVendor(
   return { ok: true, id: data.id };
 }
 
-export async function listWaterTankers(
-  supabase: SupabaseClient
-): Promise<WaterTanker[]> {
-  const { data, error } = await supabase
-    .from("water_tankers")
-    .select(
-      `
-      id,
-      delivery_date,
-      amount,
-      vendor_id,
-      notes,
-      payment_status,
-      payer_account_id,
-      building_wing,
-      flat_id,
-      created_at,
-      vendors ( name ),
-      payment_accounts ( label ),
-      flats ( flat_number )
-    `
-    )
-    .order("delivery_date", { ascending: false })
-    .limit(50);
-
-  if (error || !data) return [];
-
+function mapWaterTankerRows(
+  data: Array<Record<string, unknown>>
+): WaterTanker[] {
   return data.map((row) => {
     const vendor = Array.isArray(row.vendors) ? row.vendors[0] : row.vendors;
     const payerAccount = Array.isArray(row.payment_accounts)
@@ -133,21 +114,85 @@ export async function listWaterTankers(
           ? "shared"
           : null;
     return {
-      id: row.id,
-      deliveryDate: row.delivery_date,
+      id: String(row.id),
+      deliveryDate: String(row.delivery_date),
       amount: amount != null && Number.isFinite(amount) ? amount : null,
-      vendorId: row.vendor_id,
-      vendorName: vendor?.name?.trim() || null,
-      paymentStatus: row.payment_status,
+      vendorId: (row.vendor_id as string | null) ?? null,
+      vendorName:
+        vendor && typeof vendor === "object" && "name" in vendor
+          ? String(vendor.name ?? "").trim() || null
+          : null,
+      paymentStatus: (row.payment_status as string | null) ?? null,
       buildingWing,
-      flatId: row.flat_id,
-      flatNumber: flat?.flat_number?.trim() || null,
-      payerAccountId: row.payer_account_id,
-      payerAccountLabel: payerAccount?.label?.trim() || null,
-      notes: row.notes,
-      createdAt: row.created_at,
+      flatId: (row.flat_id as string | null) ?? null,
+      flatNumber:
+        flat && typeof flat === "object" && "flat_number" in flat
+          ? String(flat.flat_number ?? "").trim() || null
+          : null,
+      payerAccountId: (row.payer_account_id as string | null) ?? null,
+      payerAccountLabel:
+        payerAccount && typeof payerAccount === "object" && "label" in payerAccount
+          ? String(payerAccount.label ?? "").trim() || null
+          : null,
+      notes: (row.notes as string | null) ?? null,
+      createdAt: String(row.created_at),
     };
   });
+}
+
+export async function listWaterTankers(
+  supabase: SupabaseClient
+): Promise<WaterTanker[]> {
+  const fullSelect = `
+      id,
+      delivery_date,
+      amount,
+      vendor_id,
+      notes,
+      payment_status,
+      payer_account_id,
+      building_wing,
+      flat_id,
+      created_at,
+      vendors ( name ),
+      payment_accounts ( label ),
+      flats ( flat_number )
+    `;
+
+  const { data, error } = await supabase
+    .from("water_tankers")
+    .select(fullSelect)
+    .order("delivery_date", { ascending: false })
+    .limit(50);
+
+  if (!error && data) {
+    return mapWaterTankerRows(data as Array<Record<string, unknown>>);
+  }
+
+  if (error && isMissingColumnError(error.message)) {
+    const fallback = await supabase
+      .from("water_tankers")
+      .select(
+        `
+        id,
+        delivery_date,
+        amount,
+        vendor_id,
+        notes,
+        payment_status,
+        created_at,
+        vendors ( name )
+      `
+      )
+      .order("delivery_date", { ascending: false })
+      .limit(50);
+
+    if (!fallback.error && fallback.data) {
+      return mapWaterTankerRows(fallback.data as Array<Record<string, unknown>>);
+    }
+  }
+
+  return [];
 }
 
 export async function createWaterTanker(
@@ -173,25 +218,87 @@ export async function createWaterTanker(
     return { ok: false, error: "Select who paid for this tanker." };
   }
 
-  const { data, error } = await supabase
+  const fullPayload = {
+    delivery_date: input.deliveryDate,
+    amount: input.amount ?? null,
+    vendor_id: input.vendorId || null,
+    payment_status: input.paymentStatus?.trim() || "pending",
+    building_wing: input.buildingWing,
+    flat_id: input.flatId || null,
+    payer_account_id: input.payerAccountId,
+    notes: input.notes?.trim() || null,
+  };
+
+  const first = await supabase
     .from("water_tankers")
-    .insert({
-      delivery_date: input.deliveryDate,
-      amount: input.amount ?? null,
-      vendor_id: input.vendorId || null,
-      payment_status: input.paymentStatus?.trim() || "pending",
-      building_wing: input.buildingWing,
-      flat_id: input.flatId || null,
-      payer_account_id: input.payerAccountId,
-      notes: input.notes?.trim() || null,
-    })
+    .insert(fullPayload)
     .select("id")
     .single();
 
-  if (error || !data) {
-    return { ok: false, error: error?.message ?? "Could not save tanker order." };
+  if (!first.error && first.data) {
+    return { ok: true, id: first.data.id };
   }
-  return { ok: true, id: data.id };
+
+  const msg = first.error?.message ?? "Could not save tanker order.";
+
+  if (isMissingColumnError(msg)) {
+    if (/building_wing|flat_id/i.test(msg)) {
+      const { building_wing: _bw, flat_id: _fid, ...withoutLocation } = fullPayload;
+      const retry = await supabase
+        .from("water_tankers")
+        .insert(withoutLocation)
+        .select("id")
+        .single();
+
+      if (!retry.error && retry.data) {
+        return { ok: true, id: retry.data.id };
+      }
+
+      const retryMsg = retry.error?.message ?? msg;
+      if (isMissingColumnError(retryMsg) && /payer_account_id/i.test(retryMsg)) {
+        const { payer_account_id: _pid, ...legacyPayload } = withoutLocation;
+        const legacy = await supabase
+          .from("water_tankers")
+          .insert(legacyPayload)
+          .select("id")
+          .single();
+
+        if (!legacy.error && legacy.data) {
+          return { ok: true, id: legacy.data.id };
+        }
+
+        return {
+          ok: false,
+          error: `${legacy.error?.message ?? retryMsg} ${PAYMENT_ACCOUNTS_MIGRATION_HINT}`,
+        };
+      }
+
+      return {
+        ok: false,
+        error: `${retryMsg} ${EXPENSE_LOCATION_MIGRATION_HINT}`,
+      };
+    }
+
+    if (/payer_account_id/i.test(msg)) {
+      const { payer_account_id: _pid, ...withoutPayer } = fullPayload;
+      const retry = await supabase
+        .from("water_tankers")
+        .insert(withoutPayer)
+        .select("id")
+        .single();
+
+      if (!retry.error && retry.data) {
+        return { ok: true, id: retry.data.id };
+      }
+
+      return {
+        ok: false,
+        error: `${retry.error?.message ?? msg} ${PAYMENT_ACCOUNTS_MIGRATION_HINT}`,
+      };
+    }
+  }
+
+  return { ok: false, error: msg };
 }
 
 export async function updateWaterTankerPaymentStatus(
@@ -207,6 +314,80 @@ export async function updateWaterTankerPaymentStatus(
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
+}
+
+export async function updateWaterTanker(
+  supabase: SupabaseClient,
+  input: {
+    id: string;
+    deliveryDate: string;
+    amount?: number | null;
+    vendorId?: string | null;
+    paymentStatus?: string | null;
+    buildingWing: ExpenseBuildingWing;
+    flatId?: string | null;
+    payerAccountId: string;
+    notes?: string | null;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.id.trim()) return { ok: false, error: "Missing tanker id." };
+  if (!input.deliveryDate) {
+    return { ok: false, error: "Delivery date is required." };
+  }
+  if (!input.buildingWing) {
+    return { ok: false, error: "Select which building this tanker is for." };
+  }
+  if (!input.payerAccountId.trim()) {
+    return { ok: false, error: "Select who paid for this tanker." };
+  }
+
+  const payload = {
+    delivery_date: input.deliveryDate,
+    amount: input.amount ?? null,
+    vendor_id: input.vendorId || null,
+    payment_status: input.paymentStatus?.trim() || "pending",
+    building_wing: input.buildingWing,
+    flat_id: input.flatId || null,
+    payer_account_id: input.payerAccountId,
+    notes: input.notes?.trim() || null,
+  };
+
+  const first = await supabase
+    .from("water_tankers")
+    .update(payload)
+    .eq("id", input.id);
+
+  if (!first.error) return { ok: true };
+
+  const msg = first.error.message;
+  if (isMissingColumnError(msg)) {
+    if (/building_wing|flat_id/i.test(msg)) {
+      const { building_wing: _bw, flat_id: _fid, ...withoutLocation } = payload;
+      const retry = await supabase
+        .from("water_tankers")
+        .update(withoutLocation)
+        .eq("id", input.id);
+      if (!retry.error) return { ok: true };
+      return {
+        ok: false,
+        error: `${retry.error.message} ${EXPENSE_LOCATION_MIGRATION_HINT}`,
+      };
+    }
+    if (/payer_account_id/i.test(msg)) {
+      const { payer_account_id: _pid, ...withoutPayer } = payload;
+      const retry = await supabase
+        .from("water_tankers")
+        .update(withoutPayer)
+        .eq("id", input.id);
+      if (!retry.error) return { ok: true };
+      return {
+        ok: false,
+        error: `${retry.error.message} ${PAYMENT_ACCOUNTS_MIGRATION_HINT}`,
+      };
+    }
+  }
+
+  return { ok: false, error: msg };
 }
 
 export async function listVacateRequests(

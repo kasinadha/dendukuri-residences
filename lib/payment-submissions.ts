@@ -310,6 +310,28 @@ export async function createPaymentSubmission(
   return { ok: true, id: data.id };
 }
 
+export async function updatePaymentSubmissionAmount(
+  supabase: SupabaseClient,
+  input: { id: string; amount: number }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.id.trim()) return { ok: false, error: "Missing submission id." };
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return { ok: false, error: "Enter a valid amount." };
+  }
+
+  const { error } = await supabase
+    .from("payment_submissions")
+    .update({
+      amount: input.amount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.id)
+    .eq("status", "pending");
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function rejectPaymentSubmission(
   supabase: SupabaseClient,
   input: { id: string; adminNotes?: string | null; reviewedBy: string }
@@ -373,6 +395,7 @@ export async function approvePaymentSubmission(
     adminNotes?: string | null;
     reviewedBy: string;
     receiverAccountId?: string | null;
+    amount?: number | null;
   }
 ): Promise<
   | {
@@ -393,6 +416,32 @@ export async function approvePaymentSubmission(
 
   if (error || !submission) {
     return { ok: false, error: "Pending submission not found." };
+  }
+
+  const claimedAmount = num(submission.amount);
+  const approvedAmount =
+    input.amount != null && Number.isFinite(input.amount) && input.amount > 0
+      ? input.amount
+      : claimedAmount;
+
+  if (approvedAmount <= 0) {
+    return { ok: false, error: "Enter a valid amount before approving." };
+  }
+
+  if (approvedAmount !== claimedAmount) {
+    const { error: amountError } = await supabase
+      .from("payment_submissions")
+      .update({
+        amount: approvedAmount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.id)
+      .eq("status", "pending");
+
+    if (amountError) {
+      return { ok: false, error: amountError.message };
+    }
+    submission.amount = approvedAmount;
   }
 
   const purpose = asPurpose(submission.purpose);
@@ -516,8 +565,8 @@ export async function approvePaymentSubmission(
   const paymentPayload: Record<string, unknown> = {
     tenancy_id: tenancyId,
     payment_date: submission.payment_date,
-    amount_paid: submission.amount,
-    amount_due: submission.amount,
+    amount_paid: approvedAmount,
+    amount_due: approvedAmount,
     payment_mode: "upi",
     payment_type: purpose,
     transaction_reference: submission.utr,

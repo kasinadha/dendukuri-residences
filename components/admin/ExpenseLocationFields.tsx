@@ -17,6 +17,7 @@ type Props = {
   flatRequired?: boolean;
   flatHint?: string;
   defaultBuilding?: ExpenseBuildingWing | "";
+  defaultFlatId?: string;
 };
 
 export default function ExpenseLocationFields({
@@ -28,6 +29,7 @@ export default function ExpenseLocationFields({
   flatRequired = false,
   flatHint = "Optional — leave blank for whole-building or common area.",
   defaultBuilding = "",
+  defaultFlatId = "",
 }: Props) {
   const [building, setBuilding] = useState<ExpenseBuildingWing | "">(
     defaultBuilding
@@ -71,7 +73,7 @@ export default function ExpenseLocationFields({
           required={flatRequired}
           disabled={flats.length === 0}
           className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-          defaultValue=""
+          defaultValue={defaultFlatId}
         >
           <option value="">
             {flatRequired ? "Select flat" : "Not flat-specific"}

@@ -31,7 +31,7 @@ export default function PaymentSubmissionsPanel({
   const [pending, startTransition] = useTransition();
   const accountOptions = toPaymentAccountOptions(accounts);
 
-  function approve(id: string, receiverAccountId: string) {
+  function approve(id: string, receiverAccountId: string, amount: string) {
     setError("");
     setMessage("");
     setPendingId(id);
@@ -39,6 +39,9 @@ export default function PaymentSubmissionsPanel({
     formData.set("id", id);
     if (receiverAccountId) {
       formData.set("receiver_account_id", receiverAccountId);
+    }
+    if (amount.trim()) {
+      formData.set("amount", amount.trim());
     }
     startTransition(async () => {
       const result = await approvePaymentSubmissionAction(formData);
@@ -139,11 +142,14 @@ function SubmissionRow({
   accountOptions: ReturnType<typeof toPaymentAccountOptions>;
   suggestedAccountId: string;
   pending: boolean;
-  onApprove: (id: string, receiverAccountId: string) => void;
+  onApprove: (id: string, receiverAccountId: string, amount: string) => void;
   onReject: (id: string) => void;
 }) {
   const [receiverAccountId, setReceiverAccountId] = useState(
     suggestedAccountId
+  );
+  const [amount, setAmount] = useState(
+    row.amount > 0 ? String(row.amount) : ""
   );
 
   return (
@@ -196,6 +202,23 @@ function SubmissionRow({
         <div className="flex w-full shrink-0 flex-col gap-3 sm:max-w-xs">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Claimed amount (₹)
+            </span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              required
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            />
+            <span className="mt-1 block text-xs text-slate-500">
+              Override here if the tenant entered the wrong amount.
+            </span>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
               Received into
             </span>
             <select
@@ -215,7 +238,7 @@ function SubmissionRow({
             <button
               type="button"
               disabled={pending}
-              onClick={() => onApprove(row.id, receiverAccountId)}
+              onClick={() => onApprove(row.id, receiverAccountId, amount)}
               className="flex-1 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               Approve
