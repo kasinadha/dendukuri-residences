@@ -106,9 +106,12 @@ export async function tenantCreateVacate(formData: FormData) {
     return { ok: false as const, error: "No active tenancy on your account." };
   }
 
+  const requestTypeRaw = asString(formData, "request_type");
   const result = await createVacateRequest(supabase, {
     tenancyId: ctx.tenancyId,
     reason: asString(formData, "reason") || null,
+    requestType: requestTypeRaw === "transfer" ? "transfer" : "vacate",
+    preferredFlatNumber: asString(formData, "preferred_flat_number") || null,
   });
 
   if (result.ok) {

@@ -11,6 +11,7 @@ export type TenantListItem = {
   monthlyRent: number | null;
   tenancyStatus: string | null;
   hasActiveTenancy: boolean;
+  tenancyId: string | null;
 };
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
@@ -96,6 +97,10 @@ export async function listTenantsForAdmin(
       hasActiveTenancy: Boolean(
         activeTenancy && isActiveTenancyStatus(activeTenancy.status)
       ),
+      tenancyId:
+        activeTenancy && isActiveTenancyStatus(activeTenancy.status)
+          ? activeTenancy.id
+          : null,
     };
   });
 }

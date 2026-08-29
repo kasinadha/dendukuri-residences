@@ -9,7 +9,7 @@ const nav = [
   { href: "/tenant/receipts", label: "Receipts" },
   { href: "/tenant/electricity", label: "Electricity" },
   { href: "/tenant/maintenance", label: "Maintenance" },
-  { href: "/tenant/vacate", label: "Vacate" },
+  { href: "/tenant/vacate", label: "Move / transfer" },
 ] as const;
 
 export default async function TenantLayout({

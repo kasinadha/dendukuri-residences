@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { todayIsoDate } from "@/lib/dates";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
 import { PROPERTY_NAME } from "@/lib/property";
 
@@ -235,6 +236,192 @@ export async function createTenancyLink(
     tenancyId: tenancy.id,
     created,
   };
+}
+
+export type EndTenancyResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Ends an occupancy: tenancy status becomes ended/transferred and the flat
+ * is marked vacant when no other active tenancy remains.
+ */
+export async function endTenancy(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    endDate?: string | null;
+    status?: "ended" | "transferred";
+  }
+): Promise<EndTenancyResult> {
+  const tenancyId = input.tenancyId.trim();
+  if (!tenancyId) return { ok: false, error: "Missing tenancy." };
+
+  const endDate = input.endDate?.trim() || todayIsoDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { ok: false, error: "End date must be YYYY-MM-DD." };
+  }
+
+  const { data: tenancy, error: loadError } = await supabase
+    .from("tenancies")
+    .select("id,flat_id,status")
+    .eq("id", tenancyId)
+    .maybeSingle();
+
+  if (loadError || !tenancy) {
+    return { ok: false, error: loadError?.message ?? "Tenancy not found." };
+  }
+
+  if (!isActiveTenancyStatus(tenancy.status)) {
+    return { ok: false, error: "This tenancy is already closed." };
+  }
+
+  const { error: updateError } = await supabase
+    .from("tenancies")
+    .update({
+      status: input.status ?? "ended",
+      end_date: endDate,
+    })
+    .eq("id", tenancyId);
+
+  if (updateError) return { ok: false, error: updateError.message };
+
+  const { data: remaining } = await supabase
+    .from("tenancies")
+    .select("id,status")
+    .eq("flat_id", tenancy.flat_id);
+
+  const stillOccupied = (remaining ?? []).some((row) =>
+    isActiveTenancyStatus(row.status)
+  );
+  if (!stillOccupied) {
+    await supabase
+      .from("flats")
+      .update({ status: "vacant" })
+      .eq("id", tenancy.flat_id);
+  }
+
+  return { ok: true };
+}
+
+export type TransferTenancyResult =
+  | { ok: true; newTenancyId: string }
+  | { ok: false; error: string };
+
+/**
+ * Moves an existing tenant to another vacant flat. Closes the current
+ * tenancy, frees the old flat, and opens a new active tenancy.
+ */
+export async function transferTenancy(
+  supabase: SupabaseClient,
+  input: {
+    fromTenancyId: string;
+    toFlatId: string;
+    startDate?: string | null;
+    monthlyRent?: number | null;
+  }
+): Promise<TransferTenancyResult> {
+  const fromTenancyId = input.fromTenancyId.trim();
+  const toFlatId = input.toFlatId.trim();
+  if (!fromTenancyId || !toFlatId) {
+    return { ok: false, error: "Select the current tenancy and destination flat." };
+  }
+
+  const startDate = input.startDate?.trim() || todayIsoDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    return { ok: false, error: "Start date must be YYYY-MM-DD." };
+  }
+
+  const { data: current, error: loadError } = await supabase
+    .from("tenancies")
+    .select(
+      `
+      id,
+      tenant_id,
+      flat_id,
+      status,
+      monthly_rent,
+      security_deposit,
+      deposit_amount,
+      deposit_paid,
+      deposit_paid_date,
+      notes,
+      flats ( flat_number )
+    `
+    )
+    .eq("id", fromTenancyId)
+    .maybeSingle();
+
+  if (loadError || !current) {
+    return { ok: false, error: loadError?.message ?? "Current tenancy not found." };
+  }
+  if (!isActiveTenancyStatus(current.status)) {
+    return { ok: false, error: "This tenancy is already closed." };
+  }
+  if (current.flat_id === toFlatId) {
+    return { ok: false, error: "Choose a different flat for the transfer." };
+  }
+
+  const oldFlat = Array.isArray(current.flats) ? current.flats[0] : current.flats;
+  const oldRent = Number(current.monthly_rent);
+  const monthlyRent =
+    input.monthlyRent != null && Number.isFinite(input.monthlyRent)
+      ? input.monthlyRent
+      : oldRent;
+  if (!Number.isFinite(monthlyRent) || monthlyRent <= 0) {
+    return { ok: false, error: "Enter a valid monthly rent for the new flat." };
+  }
+
+  const deposit =
+    Number(current.deposit_amount ?? current.security_deposit ?? 0) || 0;
+
+  const closed = await endTenancy(supabase, {
+    tenancyId: fromTenancyId,
+    endDate: startDate,
+    status: "transferred",
+  });
+  if (!closed.ok) return closed;
+
+  const created = await createTenancyLink(supabase, {
+    flatId: toFlatId,
+    tenantId: current.tenant_id,
+    monthlyRent,
+    securityDeposit: deposit,
+    startDate,
+    status: "active",
+    source: "Internal transfer",
+  });
+
+  if (!created.ok) {
+    await supabase
+      .from("tenancies")
+      .update({ status: "active", end_date: null })
+      .eq("id", fromTenancyId);
+    await supabase
+      .from("flats")
+      .update({ status: "occupied" })
+      .eq("id", current.flat_id);
+    return created;
+  }
+
+  const extraNotes = [
+    current.notes?.trim(),
+    `Transferred from ${oldFlat?.flat_number?.trim() || "previous flat"} on ${startDate}.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await supabase
+    .from("tenancies")
+    .update({
+      deposit_amount: deposit,
+      deposit_paid: current.deposit_paid ?? deposit,
+      deposit_paid_date: current.deposit_paid_date,
+      notes: extraNotes || null,
+    })
+    .eq("id", created.tenancyId);
+
+  return { ok: true, newTenancyId: created.tenancyId };
 }
 
 export type EnsureD201Result =

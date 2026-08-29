@@ -1,12 +1,23 @@
 import AdminLayout from "@/components/admin/AdminLayout";
+import TenantOccupancyActions from "@/components/admin/TenantOccupancyActions";
 import { requireAdmin } from "@/lib/auth";
+import { listFlatsForAdmin } from "@/lib/flats";
 import { formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
 
 export default async function TenantsPage() {
   const { supabase } = await requireAdmin();
-  const tenants = await listTenantsForAdmin(supabase);
+  const [tenants, flats] = await Promise.all([
+    listTenantsForAdmin(supabase),
+    listFlatsForAdmin(supabase),
+  ]);
   const activeCount = tenants.filter((t) => t.hasActiveTenancy).length;
+  const vacantFlats = flats
+    .filter((f) => !f.isOccupied)
+    .map((f) => ({
+      id: f.id,
+      label: `Flat ${f.flatNumber}${f.type !== "—" ? ` · ${f.type}` : ""}`,
+    }));
 
   return (
     <AdminLayout>
@@ -17,8 +28,8 @@ export default async function TenantsPage() {
             Tenants
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Tenant profiles from Supabase with linked flat and rent where a
-            tenancy exists.
+            Tenant profiles with linked flat and rent. Transfer an occupying
+            tenant to a vacant flat, or mark them vacated to free the unit.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -38,19 +49,20 @@ export default async function TenantsPage() {
           </p>
         ) : (
           <>
-            <div className="hidden border-b border-slate-100 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[1.3fr_1.2fr_1fr_0.8fr_0.9fr_0.9fr] lg:gap-4 lg:px-6">
+            <div className="hidden border-b border-slate-100 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[1.2fr_1.1fr_0.8fr_0.7fr_0.8fr_0.8fr_1.3fr] lg:gap-4 lg:px-6">
               <span>Name</span>
               <span>Contact</span>
               <span>Flat</span>
               <span>Type</span>
               <span>Rent</span>
               <span>Status</span>
+              <span>Occupancy</span>
             </div>
             <ul className="divide-y divide-slate-100">
               {tenants.map((tenant) => (
                 <li
                   key={tenant.id}
-                  className="grid gap-2 px-5 py-4 lg:grid-cols-[1.3fr_1.2fr_1fr_0.8fr_0.9fr_0.9fr] lg:items-center lg:gap-4 lg:px-6"
+                  className="grid gap-2 px-5 py-4 lg:grid-cols-[1.2fr_1.1fr_0.8fr_0.7fr_0.8fr_0.8fr_1.3fr] lg:items-start lg:gap-4 lg:px-6"
                 >
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
@@ -110,6 +122,22 @@ export default async function TenantsPage() {
                     >
                       {tenant.tenancyStatus ?? "no tenancy"}
                     </span>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 lg:hidden">
+                      Occupancy
+                    </p>
+                    {tenant.hasActiveTenancy && tenant.tenancyId ? (
+                      <TenantOccupancyActions
+                        tenancyId={tenant.tenancyId}
+                        vacantFlats={vacantFlats}
+                        currentRent={tenant.monthlyRent}
+                      />
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        {tenant.tenancyStatus ? "No active occupancy" : "—"}
+                      </p>
+                    )}
                   </div>
                 </li>
               ))}

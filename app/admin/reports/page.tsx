@@ -1,17 +1,25 @@
 import AdminLayout from "@/components/admin/AdminLayout";
 import VacateAdminList from "@/components/admin/VacateAdminList";
 import { requireAdmin } from "@/lib/auth";
+import { listFlatsForAdmin } from "@/lib/flats";
 import { listVacateRequests } from "@/lib/ops";
 import { formatInr, listReceiptViews } from "@/lib/receipts";
 
 export default async function ReportsPage() {
   const { supabase } = await requireAdmin();
-  const [receipts, vacates] = await Promise.all([
+  const [receipts, vacates, flats] = await Promise.all([
     listReceiptViews(supabase, { limit: 12 }),
     listVacateRequests(supabase),
+    listFlatsForAdmin(supabase),
   ]);
 
   const collected = receipts.reduce((sum, r) => sum + r.rentAmount, 0);
+  const vacantFlats = flats
+    .filter((f) => !f.isOccupied)
+    .map((f) => ({
+      id: f.id,
+      label: `Flat ${f.flatNumber}${f.type !== "—" ? ` · ${f.type}` : ""}`,
+    }));
 
   return (
     <AdminLayout>
@@ -21,7 +29,7 @@ export default async function ReportsPage() {
           Reports
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
-          Recent collections and vacate request status.
+          Recent collections, move-out, and internal transfer requests.
         </p>
       </div>
 
@@ -36,7 +44,7 @@ export default async function ReportsPage() {
           </p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm text-slate-500">Vacate requests</p>
+          <p className="text-sm text-slate-500">Move requests</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {vacates.length}
           </p>
@@ -48,15 +56,24 @@ export default async function ReportsPage() {
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
-          <h3 className="text-lg font-bold text-slate-900">Vacate requests</h3>
+          <h3 className="text-lg font-bold text-slate-900">
+            Move-out and transfer requests
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Approve notice, then complete to update occupancy. Completing a
+            transfer assigns the tenant to a vacant flat.
+          </p>
         </div>
         <VacateAdminList
+          vacantFlats={vacantFlats}
           rows={vacates.map((row) => ({
             id: row.id,
             tenantName: row.tenantName ?? "—",
             flatNumber: row.flatNumber ?? "—",
             status: row.status,
+            requestType: row.requestType,
             reason: row.reason,
+            preferredFlatNumber: row.preferredFlatNumber,
           }))}
         />
       </section>

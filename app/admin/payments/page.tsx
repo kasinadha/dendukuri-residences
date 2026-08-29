@@ -1,9 +1,11 @@
 import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
+import OwnerDuesRemindersPanel from "@/components/admin/OwnerDuesRemindersPanel";
 import PaymentSubmissionsPanel from "@/components/admin/PaymentSubmissionsPanel";
 import RecordPaymentForm, {
   type TenancyOption,
 } from "@/components/admin/RecordPaymentForm";
+import UnpaidRentRemindersPanel from "@/components/admin/UnpaidRentRemindersPanel";
 import { requireAdmin } from "@/lib/auth";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
 import { listPaymentSubmissions } from "@/lib/payment-submissions";
@@ -12,6 +14,10 @@ import {
   formatDisplayDate,
   formatInr,
 } from "@/lib/receipts";
+import {
+  listOwnerDueReminders,
+  listUnpaidRentReminders,
+} from "@/lib/reminders";
 import {
   getRentMonthSummary,
   listPaymentHistory,
@@ -82,17 +88,20 @@ export default async function PaymentsPage({ searchParams }: Props) {
       };
     });
 
-  const [monthSummary, history, pendingSubmissions] = await Promise.all([
-    getRentMonthSummary(supabase, month),
-    listPaymentHistory(supabase, {
-      month,
-      flat,
-      tenant,
-      status,
-      limit: 80,
-    }),
-    listPaymentSubmissions(supabase, { status: "pending", limit: 40 }),
-  ]);
+  const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues] =
+    await Promise.all([
+      getRentMonthSummary(supabase, month),
+      listPaymentHistory(supabase, {
+        month,
+        flat,
+        tenant,
+        status,
+        limit: 80,
+      }),
+      listPaymentSubmissions(supabase, { status: "pending", limit: 40 }),
+      listUnpaidRentReminders(supabase, month),
+      listOwnerDueReminders(supabase),
+    ]);
 
   const filterMonth = month ?? monthSummary.billingMonthKey;
 
@@ -160,6 +169,15 @@ export default async function PaymentsPage({ searchParams }: Props) {
             <p className="mt-2 text-xs text-slate-500">{card.detail}</p>
           </div>
         ))}
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <UnpaidRentRemindersPanel
+          billingMonthKey={unpaidReminders.billingMonthKey}
+          billingMonthLabel={unpaidReminders.billingMonthLabel}
+          rows={unpaidReminders.rows}
+        />
+        <OwnerDuesRemindersPanel items={ownerDues} />
       </div>
 
       <div className="mt-8">
