@@ -16,32 +16,12 @@ type LookedUpFlat = {
   flatId: string;
   flatNumber: string;
   status: string | null;
-  monthlyRent: number | null;
-  maintenanceAmount: number | null;
-  deposit: number | null;
   displayUpiId: string | null;
   displayUpiQrUrl: string | null;
   payeeName: string;
 };
 
 const PURPOSES: PaymentPurpose[] = ["rent", "advance", "maintenance"];
-
-function suggestedAmount(
-  purpose: PaymentPurpose,
-  flat: LookedUpFlat | null
-): string {
-  if (!flat) return "";
-  if (purpose === "rent" && flat.monthlyRent != null) {
-    return String(flat.monthlyRent);
-  }
-  if (purpose === "maintenance" && flat.maintenanceAmount != null) {
-    return String(flat.maintenanceAmount);
-  }
-  if (purpose === "advance" && flat.deposit != null) {
-    return String(flat.deposit);
-  }
-  return "";
-}
 
 export default function PublicPayForm() {
   const [pending, startTransition] = useTransition();
@@ -85,13 +65,13 @@ export default function PublicPayForm() {
       }
       setFlat(result.flat);
       setFlatInput(result.flat.flatNumber);
-      setAmount(suggestedAmount(purpose, result.flat));
+      // Never preload rent/deposit/maintenance for anonymous payers.
+      setAmount("");
     });
   }
 
   function changePurpose(next: PaymentPurpose) {
     setPurpose(next);
-    setAmount(suggestedAmount(next, flat));
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -115,7 +95,7 @@ export default function PublicPayForm() {
         "Submitted. The owner will review your UTR. A receipt is only created after approval."
       );
       event.currentTarget.reset();
-      setAmount(suggestedAmount(purpose, flat));
+      setAmount("");
       setBillingMonth(currentBillingMonthKey());
     });
   }
@@ -128,7 +108,8 @@ export default function PublicPayForm() {
       >
         <h2 className="text-lg font-bold text-slate-900">1. Flat details</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Enter your flat number to load the correct UPI details.
+          Enter your flat number to load UPI details. Amount is entered by you —
+          rent and dues are not shown here.
         </p>
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
           <label className="block flex-1">
@@ -154,9 +135,8 @@ export default function PublicPayForm() {
         </div>
         {flat ? (
           <p className="mt-3 text-sm text-emerald-800">
-            Flat {flat.flatNumber}
-            {flat.status ? ` · ${flat.status}` : ""} found. Choose purpose and
-            pay below.
+            Flat {flat.flatNumber} found. Choose purpose, enter the amount you
+            are paying, and continue below.
           </p>
         ) : null}
       </form>
@@ -166,7 +146,8 @@ export default function PublicPayForm() {
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="text-lg font-bold text-slate-900">2. Pay via UPI</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Pay first, then submit your UTR for owner confirmation.
+              Enter the amount you owe, pay first, then submit your UTR for
+              owner confirmation.
             </p>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -185,6 +166,25 @@ export default function PublicPayForm() {
                 </button>
               ))}
             </div>
+
+            <label className="mt-5 block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">
+                Amount to pay (₹)
+              </span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                required
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Enter amount"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+              />
+              <span className="mt-1 block text-xs text-slate-500">
+                Enter the amount yourself. Flat rent is not shown on this page.
+              </span>
+            </label>
 
             {!flat.displayUpiId ? (
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -218,7 +218,11 @@ export default function PublicPayForm() {
                   >
                     Open UPI app
                   </a>
-                ) : null}
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Enter an amount above to generate the UPI link and QR.
+                  </p>
+                )}
                 <p className="text-xs text-slate-500">
                   Tip: include flat {flat.flatNumber} in the UPI remark if asked.
                 </p>
@@ -303,6 +307,7 @@ export default function PublicPayForm() {
                   step="1"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
+                  placeholder="Enter amount"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>
@@ -377,7 +382,7 @@ export default function PublicPayForm() {
 
             <button
               type="submit"
-              disabled={pending}
+              disabled={pending || !amount}
               className="mt-6 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
             >
               {pending ? "Submitting…" : "Submit for confirmation"}

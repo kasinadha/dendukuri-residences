@@ -43,7 +43,9 @@ export async function lookupPublicFlatAction(formData: FormData) {
   return {
     ok: true as const,
     flat: {
-      ...result.flat,
+      flatId: result.flat.flatId,
+      flatNumber: result.flat.flatNumber,
+      status: result.flat.status,
       displayUpiId: upi.upiId,
       displayUpiQrUrl: upi.upiQrUrl,
       payeeName: upi.payeeName,

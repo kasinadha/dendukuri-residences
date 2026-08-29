@@ -13,6 +13,7 @@ import {
   ContactRound,
   CircleHelp,
   BarChart3,
+  Landmark,
 } from "lucide-react";
 
 export const adminNavItems = [
@@ -20,6 +21,7 @@ export const adminNavItems = [
   { label: "Flats", href: "/admin/flats", icon: Building2 },
   { label: "Tenants", href: "/admin/tenants", icon: Users },
   { label: "Rent & Payments", href: "/admin/payments", icon: IndianRupee },
+  { label: "Accounts", href: "/admin/accounts", icon: Landmark },
   { label: "Electricity", href: "/admin/electricity", icon: Zap },
   { label: "Maintenance", href: "/admin/maintenance", icon: Wrench },
   { label: "Water Tankers", href: "/admin/water", icon: Droplets },

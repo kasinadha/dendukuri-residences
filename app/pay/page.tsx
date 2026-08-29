@@ -25,9 +25,9 @@ export default function PublicPayPage() {
           Pay rent or dues
         </h1>
         <p className="mt-2 max-w-2xl text-slate-500">
-          Flat number is required. Choose rent, advance (deposit), or
-          maintenance, pay via UPI, then submit your UTR. The owner confirms
-          before any receipt is issued.
+          Flat number is required to load UPI. Enter the amount yourself — rent
+          and dues are not shown without a tenant login. Choose rent, advance, or
+          maintenance, pay via UPI, then submit your UTR for owner confirmation.
         </p>
 
         <div className="mt-8">

@@ -36,9 +36,11 @@ export async function createWaterTankerAction(formData: FormData) {
     amount: amountRaw ? Number(amountRaw) : null,
     vendorId: asString(formData, "vendor_id") || null,
     paymentStatus: asString(formData, "payment_status") || "pending",
+    payerAccountId: asString(formData, "payer_account_id") || null,
     notes: asString(formData, "notes") || null,
   });
   if (result.ok) revalidatePath("/admin/water");
+  if (result.ok) revalidatePath("/admin/reports");
   return result;
 }
 

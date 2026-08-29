@@ -24,10 +24,12 @@ export async function createMaintenanceAction(formData: FormData) {
     priority: asString(formData, "priority") || "normal",
     cost: costRaw ? Number(costRaw) : null,
     category: asString(formData, "category") || null,
+    payerAccountId: asString(formData, "payer_account_id") || null,
   });
 
   if (result.ok) {
     revalidatePath("/admin/maintenance");
+    revalidatePath("/admin/reports");
     revalidatePath("/tenant");
   }
 

@@ -17,6 +17,8 @@ export type WaterTanker = {
   vendorId: string | null;
   vendorName: string | null;
   paymentStatus: string | null;
+  payerAccountId: string | null;
+  payerAccountLabel: string | null;
   notes: string | null;
   createdAt: string;
 };
@@ -97,8 +99,10 @@ export async function listWaterTankers(
       vendor_id,
       notes,
       payment_status,
+      payer_account_id,
       created_at,
-      vendors ( name )
+      vendors ( name ),
+      payment_accounts ( label )
     `
     )
     .order("delivery_date", { ascending: false })
@@ -108,6 +112,9 @@ export async function listWaterTankers(
 
   return data.map((row) => {
     const vendor = Array.isArray(row.vendors) ? row.vendors[0] : row.vendors;
+    const payerAccount = Array.isArray(row.payment_accounts)
+      ? row.payment_accounts[0]
+      : row.payment_accounts;
     const amount =
       row.amount == null ? null : Number(row.amount);
     return {
@@ -117,6 +124,8 @@ export async function listWaterTankers(
       vendorId: row.vendor_id,
       vendorName: vendor?.name?.trim() || null,
       paymentStatus: row.payment_status,
+      payerAccountId: row.payer_account_id,
+      payerAccountLabel: payerAccount?.label?.trim() || null,
       notes: row.notes,
       createdAt: row.created_at,
     };
@@ -130,6 +139,7 @@ export async function createWaterTanker(
     amount?: number | null;
     vendorId?: string | null;
     paymentStatus?: string | null;
+    payerAccountId?: string | null;
     notes?: string | null;
   }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
@@ -144,6 +154,7 @@ export async function createWaterTanker(
       amount: input.amount ?? null,
       vendor_id: input.vendorId || null,
       payment_status: input.paymentStatus?.trim() || "pending",
+      payer_account_id: input.payerAccountId || null,
       notes: input.notes?.trim() || null,
     })
     .select("id")

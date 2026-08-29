@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useState, useTransition } from "react";
 import { recordRentPayment } from "@/app/admin/payments/actions";
+import AccountSelectField from "@/components/admin/AccountSelectField";
 import { computePaymentStatus } from "@/lib/payment-status";
+import type { PaymentAccountOption } from "@/lib/payment-accounts";
 
 export type TenancyOption = {
   id: string;
@@ -11,6 +13,7 @@ export type TenancyOption = {
   flatNumber: string;
   tenantName: string;
   monthlyRent: number | null;
+  suggestedReceiverAccountId?: string | null;
 };
 
 const PAYMENT_METHODS = [
@@ -43,14 +46,18 @@ function todayIsoDate(): string {
 
 type Props = {
   tenancies: TenancyOption[];
+  accounts: PaymentAccountOption[];
 };
 
-export default function RecordPaymentForm({ tenancies }: Props) {
+export default function RecordPaymentForm({ tenancies, accounts }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [tenancyId, setTenancyId] = useState(tenancies[0]?.id ?? "");
+  const [receiverAccountId, setReceiverAccountId] = useState(
+    tenancies[0]?.suggestedReceiverAccountId ?? ""
+  );
   const selected = tenancies.find((t) => t.id === tenancyId) ?? tenancies[0];
   const [amountDue, setAmountDue] = useState(
     selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
@@ -69,6 +76,7 @@ export default function RecordPaymentForm({ tenancies }: Props) {
   function onTenancyChange(id: string) {
     setTenancyId(id);
     const next = tenancies.find((t) => t.id === id);
+    setReceiverAccountId(next?.suggestedReceiverAccountId ?? "");
     if (next?.monthlyRent != null) {
       setAmountDue(String(next.monthlyRent));
       setAmountPaid(String(next.monthlyRent));
@@ -228,6 +236,17 @@ export default function RecordPaymentForm({ tenancies }: Props) {
             ))}
           </select>
         </label>
+
+        <AccountSelectField
+          key={tenancyId}
+          accounts={accounts}
+          name="receiver_account_id"
+          label="Received into account"
+          hint="Auto-filled from flat QR/UPI when available. Override if needed."
+          defaultValue={receiverAccountId}
+          allowEmpty
+          emptyLabel="Unassigned"
+        />
 
         <div className="rounded-xl border border-slate-200 px-4 py-3 text-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">

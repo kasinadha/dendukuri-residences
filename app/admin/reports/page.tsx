@@ -1,16 +1,30 @@
 import AdminLayout from "@/components/admin/AdminLayout";
+import BuildingRevenuePanel from "@/components/admin/BuildingRevenuePanel";
 import VacateAdminList from "@/components/admin/VacateAdminList";
 import { requireAdmin } from "@/lib/auth";
+import { getBuildingRevenueReport } from "@/lib/building-revenue";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { listVacateRequests } from "@/lib/ops";
-import { formatInr, listReceiptViews } from "@/lib/receipts";
+import { currentBillingMonthKey } from "@/lib/rent-upi";
+import { formatBillingMonthLabel, formatInr, listReceiptViews } from "@/lib/receipts";
 
-export default async function ReportsPage() {
+type Props = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function ReportsPage({ searchParams }: Props) {
   const { supabase } = await requireAdmin();
-  const [receipts, vacates, flats] = await Promise.all([
+  const params = (await searchParams) ?? {};
+  const month =
+    typeof params.month === "string" && /^\d{4}-\d{2}$/.test(params.month)
+      ? params.month
+      : currentBillingMonthKey();
+
+  const [receipts, vacates, flats, revenueReport] = await Promise.all([
     listReceiptViews(supabase, { limit: 12 }),
     listVacateRequests(supabase),
     listFlatsForAdmin(supabase),
+    getBuildingRevenueReport(supabase, { billingMonth: month }),
   ]);
 
   const collected = receipts.reduce((sum, r) => sum + r.rentAmount, 0);
@@ -29,9 +43,34 @@ export default async function ReportsPage() {
           Reports
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
-          Recent collections, move-out, and internal transfer requests.
+          Building C/D revenue share, account splits, move-out requests, and
+          recent collections.
         </p>
+        <form method="get" className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Revenue month
+            </span>
+            <input
+              type="month"
+              name="month"
+              defaultValue={month}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            type="submit"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Apply
+          </button>
+        </form>
       </div>
+
+      <BuildingRevenuePanel
+        report={revenueReport}
+        billingMonthLabel={formatBillingMonthLabel(month)}
+      />
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

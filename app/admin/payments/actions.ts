@@ -8,6 +8,8 @@ import {
   rejectPaymentSubmission,
 } from "@/lib/payment-submissions";
 import { computePaymentStatus } from "@/lib/payment-status";
+import { resolveReceiverAccountId } from "@/lib/payment-accounts";
+import { buildingWingFromFlatNumber } from "@/lib/building-wing";
 import {
   encodeBillingMonthNote,
   insertReceiptWithUniqueNumber,
@@ -33,11 +35,13 @@ export async function approvePaymentSubmissionAction(formData: FormData) {
     id: asString(formData, "id"),
     adminNotes: asString(formData, "admin_notes") || null,
     reviewedBy: user.id,
+    receiverAccountId: asString(formData, "receiver_account_id") || null,
   });
   if (result.ok) {
     revalidatePath("/admin/payments");
     revalidatePath("/admin/receipts");
     revalidatePath("/admin");
+    revalidatePath("/admin/reports");
     revalidatePath("/tenant/receipts");
     revalidatePath("/tenant/pay");
     revalidatePath("/tenant");
@@ -75,6 +79,8 @@ export async function recordRentPayment(
   const transactionReference = asString(formData, "transaction_reference");
   const notes = asString(formData, "notes");
   const waived = asString(formData, "waived") === "1";
+  const explicitReceiverAccountId =
+    asString(formData, "receiver_account_id") || null;
 
   if (!tenancyId) return { ok: false, error: "Select a tenancy." };
   if (!paymentDate) return { ok: false, error: "Payment date is required." };
@@ -97,7 +103,14 @@ export async function recordRentPayment(
 
   const { data: tenancy, error: tenancyError } = await supabase
     .from("tenancies")
-    .select("id,status,monthly_rent")
+    .select(
+      `
+      id,
+      status,
+      monthly_rent,
+      flats ( flat_number, upi_id, upi_qr_url, payment_account_id )
+    `
+    )
     .eq("id", tenancyId)
     .maybeSingle();
 
@@ -117,6 +130,15 @@ export async function recordRentPayment(
     ? "waived"
     : computePaymentStatus(amountDue, amountPaid);
 
+  const flat = Array.isArray(tenancy.flats) ? tenancy.flats[0] : tenancy.flats;
+  const receiverAccountId = await resolveReceiverAccountId(supabase, {
+    explicitAccountId: explicitReceiverAccountId,
+    upiId: flat?.upi_id,
+    upiQrUrl: flat?.upi_qr_url,
+    flatPaymentAccountId: flat?.payment_account_id,
+    buildingWing: buildingWingFromFlatNumber(flat?.flat_number),
+  });
+
   const paymentPayload: Record<string, unknown> = {
     tenancy_id: tenancyId,
     payment_date: paymentDate,
@@ -128,6 +150,10 @@ export async function recordRentPayment(
     status,
     notes: encodeBillingMonthNote(billingMonth, notes || undefined),
   };
+
+  if (receiverAccountId) {
+    paymentPayload.receiver_account_id = receiverAccountId;
+  }
 
   const { data: payment, error: paymentError } = await supabase
     .from("payments")
@@ -165,6 +191,7 @@ export async function recordRentPayment(
     revalidatePath("/admin/payments");
     revalidatePath("/admin/receipts");
     revalidatePath("/admin");
+    revalidatePath("/admin/reports");
     revalidatePath("/tenant/receipts");
 
     return {
