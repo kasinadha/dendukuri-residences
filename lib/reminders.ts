@@ -49,7 +49,7 @@ function reminderMessage(row: MonthlyDuesLedgerRow): string {
 }
 
 /**
- * Unpaid / partial / overdue active tenancies for a month (rent + monthly charges).
+ * Unpaid / partial / overdue tenancies for a month (rent + monthly charges + electricity).
  */
 export async function listUnpaidRentReminders(
   supabase: SupabaseClient,

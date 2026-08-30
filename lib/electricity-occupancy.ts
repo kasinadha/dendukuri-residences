@@ -1,4 +1,4 @@
-import { isActiveTenancyStatus } from "@/lib/occupancy";
+import { isActiveTenancyStatus, isEndedTenancyStatus } from "@/lib/occupancy";
 import { formatDisplayDate } from "@/lib/receipts";
 
 export type ElectricityBillingOccupancyKind =
@@ -58,6 +58,13 @@ export function tenancyOverlapsBillingMonth(
   const { start: monthStart, end: monthEnd } =
     billingMonthDateRange(billingMonthKey);
   const status = (tenancy.status ?? "").toLowerCase();
+
+  if (isEndedTenancyStatus(tenancy.status)) {
+    const endDate = tenancy.end_date?.trim();
+    if (!endDate) return false;
+    const start = tenancy.start_date?.trim() || endDate;
+    return dateRangesOverlap(start, endDate, monthStart, monthEnd);
+  }
 
   if (status === "confirmed" && tenancy.start_date) {
     return (

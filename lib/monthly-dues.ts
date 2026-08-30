@@ -4,9 +4,10 @@ import {
   type DuesBreakdownLine,
 } from "@/lib/dues-breakdown";
 import { roundElectricityDue } from "@/lib/electricity-billing";
-import { tenancyOverlapsBillingMonth } from "@/lib/electricity-occupancy";
-import { isActiveTenancyStatus } from "@/lib/occupancy";
-import { tenancyOwesMonthlyRent } from "@/lib/rent-billing-month";
+import {
+  tenancyIncludedInMonthlyLedger,
+  tenancyOwesMonthlyDues,
+} from "@/lib/rent-billing-month";
 import {
   applyOverdueIfNeeded,
   computePaymentStatus,
@@ -224,8 +225,8 @@ function buildMonthlyDuesLines(input: {
 }
 
 /**
- * Monthly dues for active tenancies: rent + monthly charges + electricity.
- * Rent/charges start the month after move-in; electricity follows billing occupancy.
+ * Monthly dues per tenancy for a billing month: rent + charges + electricity.
+ * Move-in month: no dues. Vacate month: final dues, then omitted next month.
  */
 export async function getMonthlyDuesSummary(
   supabase: SupabaseClient,
@@ -238,11 +239,8 @@ export async function getMonthlyDuesSummary(
     loadActiveTenancies(supabase),
     loadElectricityDueByFlatId(supabase, monthKey),
   ]);
-  const active = tenancyRows.filter((row) =>
-    isActiveTenancyStatus(row.status)
-  );
-  const billable = active.filter((row) =>
-    tenancyOverlapsBillingMonth(
+  const billable = tenancyRows.filter((row) =>
+    tenancyIncludedInMonthlyLedger(
       {
         start_date: (row as { start_date?: string | null }).start_date ?? null,
         end_date: (row as { end_date?: string | null }).end_date ?? null,
@@ -335,7 +333,7 @@ export async function getMonthlyDuesSummary(
       end_date: (row as { end_date?: string | null }).end_date ?? null,
       status: row.status,
     };
-    const owesRent = tenancyOwesMonthlyRent(tenancyDates, monthKey);
+    const owesDues = tenancyOwesMonthlyDues(tenancyDates, monthKey);
     const charges = buildTenantMonthlyCharges({
       maintenanceCharge: numOrNull(
         (row as { maintenance_charge?: unknown }).maintenance_charge
@@ -355,13 +353,14 @@ export async function getMonthlyDuesSummary(
       flatMaintenanceFallback: numOrNull(flat?.maintenance_amount),
     });
 
-    const rentDue = owesRent ? num(row.monthly_rent) : 0;
-    const maintenanceCharge = owesRent ? charges.maintenanceCharge : 0;
-    const carParkingCharge = owesRent ? charges.carParkingCharge : 0;
-    const washingMachineCharge = owesRent ? charges.washingMachineCharge : 0;
-    const otherMonthlyCharge = owesRent ? charges.otherMonthlyCharge : 0;
-    const chargesDue = owesRent ? charges.totalMonthlyCharges : 0;
-    const electricityCharge = electricityByFlatId.get(flat?.id ?? "") ?? 0;
+    const rentDue = owesDues ? num(row.monthly_rent) : 0;
+    const maintenanceCharge = owesDues ? charges.maintenanceCharge : 0;
+    const carParkingCharge = owesDues ? charges.carParkingCharge : 0;
+    const washingMachineCharge = owesDues ? charges.washingMachineCharge : 0;
+    const otherMonthlyCharge = owesDues ? charges.otherMonthlyCharge : 0;
+    const chargesDue = owesDues ? charges.totalMonthlyCharges : 0;
+    const electricityRaw = electricityByFlatId.get(flat?.id ?? "") ?? 0;
+    const electricityCharge = owesDues ? electricityRaw : 0;
     const lines = buildMonthlyDuesLines({
       rentDue,
       maintenanceCharge,
