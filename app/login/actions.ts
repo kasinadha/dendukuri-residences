@@ -96,10 +96,12 @@ export async function signInWithPasswordAction(
   await supabase.auth.signOut({ scope: "global" });
 
   const loginEmails: string[] = [];
-  if (resolved.email) loginEmails.push(resolved.email);
   if (resolved.mobile) {
     const synthetic = tenantLoginEmailFromMobile(resolved.mobile);
-    if (!loginEmails.includes(synthetic)) loginEmails.push(synthetic);
+    loginEmails.push(synthetic);
+  }
+  if (resolved.email && !loginEmails.includes(resolved.email)) {
+    loginEmails.push(resolved.email);
   }
 
   let signedInUser: User | null = null;
@@ -118,20 +120,6 @@ export async function signInWithPasswordAction(
     signInError = result.error;
   }
 
-  // Fallback: Auth phone identity (+91…) when email paths fail
-  if (!signedInUser && resolved.mobile) {
-    const phoneResult = await supabase.auth.signInWithPassword({
-      phone: `+91${resolved.mobile}`,
-      password,
-    });
-    if (!phoneResult.error && phoneResult.data.user) {
-      signedInUser = phoneResult.data.user;
-      signInError = null;
-    } else {
-      signInError = phoneResult.error ?? signInError;
-    }
-  }
-
   if (signInError || !signedInUser) {
     const msg = signInError?.message || "Sign-in failed.";
     if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
@@ -141,7 +129,11 @@ export async function signInWithPasswordAction(
           "Cannot reach Supabase (network/DNS). Check internet, that NEXT_PUBLIC_SUPABASE_URL is correct, and restart the app from Terminal (not a proxied Cursor shell): npm run start -- -p 3100",
       };
     }
-    if (/invalid login credentials/i.test(msg) && resolved.mobile) {
+    if (
+      resolved.mobile &&
+      (/invalid login credentials/i.test(msg) ||
+        /phone logins are disabled/i.test(msg))
+    ) {
       return {
         ok: false,
         error:
