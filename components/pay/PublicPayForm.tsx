@@ -5,12 +5,15 @@ import {
   lookupPublicFlatAction,
   submitPublicPayClaimAction,
 } from "@/app/pay/actions";
+import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
+import type { DuesBreakdown } from "@/lib/dues-breakdown";
+import { parseRupeeAmountInput } from "@/lib/dues-breakdown";
+import { purposeLabel, type PaymentPurpose } from "@/lib/public-pay";
 import {
   buildUpiPayLink,
   buildUpiQrImageUrl,
   currentBillingMonthKey,
 } from "@/lib/rent-upi";
-import { purposeLabel, type PaymentPurpose } from "@/lib/public-pay";
 
 type LookedUpFlat = {
   flatId: string;
@@ -39,16 +42,18 @@ export default function PublicPayForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [flatInput, setFlatInput] = useState("");
+  const [payerPhone, setPayerPhone] = useState("");
   const [flat, setFlat] = useState<LookedUpFlat | null>(null);
+  const [tenantName, setTenantName] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
+  const [verificationError, setVerificationError] = useState("");
   const [purpose, setPurpose] = useState<PaymentPurpose>("rent");
   const [amount, setAmount] = useState("");
   const [billingMonth, setBillingMonth] = useState(currentBillingMonthKey());
 
-  const amountNum = Number(amount);
+  const amountNum = parseRupeeAmountInput(amount) ?? 0;
   const upiLink = useMemo(() => {
-    if (!flat?.displayUpiId || !Number.isFinite(amountNum) || amountNum <= 0) {
-      return null;
-    }
+    if (!flat?.displayUpiId || amountNum <= 0) return null;
     return buildUpiPayLink({
       upiId: flat.displayUpiId,
       payeeName: flat.payeeName,
@@ -62,32 +67,65 @@ export default function PublicPayForm() {
   const generatedQrUrl = upiLink ? buildUpiQrImageUrl(upiLink) : null;
   const qrUrl = flat?.displayUpiQrUrl?.trim() || generatedQrUrl;
 
+  function applyBreakdown(next: DuesBreakdown | null) {
+    setBreakdown(next);
+    if (next && next.totalOutstanding > 0) {
+      setAmount(String(next.totalOutstanding));
+    }
+  }
+
   function lookupFlat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    setVerificationError("");
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    formData.set("billing_month", billingMonth);
     startTransition(async () => {
       try {
         const result = await lookupPublicFlatAction(formData);
         if (!result.ok) {
           setFlat(null);
+          setBreakdown(null);
+          setTenantName(null);
           setError(result.error);
           return;
         }
         setFlat(result.flat);
         setFlatInput(result.flat.flatNumber);
-        // Never preload rent/deposit/maintenance for anonymous payers.
-        setAmount("");
+        setTenantName(result.tenantName);
+        applyBreakdown(result.breakdown);
+        if ("verificationError" in result && result.verificationError) {
+          setVerificationError(result.verificationError);
+          setAmount("");
+        } else if (!result.breakdown) {
+          setAmount("");
+        }
       } catch (err) {
         setFlat(null);
+        setBreakdown(null);
         setError(formatActionError(err));
       }
     });
   }
 
-  function changePurpose(next: PaymentPurpose) {
-    setPurpose(next);
+  function reloadDues(month: string) {
+    if (!flat || !payerPhone.trim()) return;
+    setBillingMonth(month);
+    const formData = new FormData();
+    formData.set("flat_number", flat.flatNumber);
+    formData.set("payer_phone", payerPhone);
+    formData.set("billing_month", month);
+    startTransition(async () => {
+      try {
+        const result = await lookupPublicFlatAction(formData);
+        if (!result.ok || !result.breakdown) return;
+        applyBreakdown(result.breakdown);
+      } catch {
+        // ignore background refresh errors
+      }
+    });
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -98,9 +136,8 @@ export default function PublicPayForm() {
       setError("Look up your flat number first.");
       return;
     }
-    const amountRaw = amount.trim();
-    const amountNum = Number(amountRaw);
-    if (!amountRaw || !Number.isFinite(amountNum) || amountNum <= 0) {
+    const amountValue = parseRupeeAmountInput(amount);
+    if (amountValue == null) {
       setError("Enter a valid amount.");
       return;
     }
@@ -108,7 +145,11 @@ export default function PublicPayForm() {
     const formData = new FormData(form);
     formData.set("flat_number", flat.flatNumber);
     formData.set("purpose", purpose);
-    formData.set("amount", amountRaw);
+    formData.set("amount", String(amountValue));
+    formData.set("payer_phone", payerPhone);
+    if (breakdown) {
+      formData.set("dues_breakdown_json", JSON.stringify(breakdown));
+    }
     startTransition(async () => {
       try {
         const result = await submitPublicPayClaimAction(formData);
@@ -121,6 +162,10 @@ export default function PublicPayForm() {
         );
         form.reset();
         setAmount("");
+        setBreakdown(null);
+        setTenantName(null);
+        setFlat(null);
+        setPayerPhone("");
         setBillingMonth(currentBillingMonthKey());
       } catch (err) {
         setError(formatActionError(err));
@@ -134,13 +179,13 @@ export default function PublicPayForm() {
         onSubmit={lookupFlat}
         className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
       >
-        <h2 className="text-lg font-bold text-slate-900">1. Flat details</h2>
+        <h2 className="text-lg font-bold text-slate-900">1. Flat & mobile</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Enter your flat number to load UPI details. Amount is entered by you —
-          rent and dues are not shown here.
+          Enter your flat number and registered mobile to load dues breakdown and
+          UPI details.
         </p>
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="block flex-1">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-700">
               Flat number
             </span>
@@ -157,25 +202,62 @@ export default function PublicPayForm() {
                   next.trim().toUpperCase() !== flat.flatNumber.toUpperCase()
                 ) {
                   setFlat(null);
+                  setBreakdown(null);
+                  setTenantName(null);
                   setAmount("");
-                  setSuccess("");
+                  setVerificationError("");
                 }
               }}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm uppercase"
             />
           </label>
-          <button
-            type="submit"
-            disabled={pending}
-            className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            {pending && !flat ? "Looking up…" : "Continue"}
-          </button>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Registered mobile
+            </span>
+            <input
+              name="payer_phone"
+              required
+              inputMode="tel"
+              placeholder="10-digit mobile on tenancy"
+              value={payerPhone}
+              onChange={(e) => {
+                setPayerPhone(e.target.value);
+                setVerificationError("");
+              }}
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Billing month
+            </span>
+            <input
+              type="month"
+              name="billing_month_lookup"
+              required
+              value={billingMonth}
+              onChange={(e) => setBillingMonth(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm sm:max-w-xs"
+            />
+          </label>
         </div>
+        <button
+          type="submit"
+          disabled={pending}
+          className="mt-4 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {pending && !flat ? "Loading…" : "Load dues & UPI"}
+        </button>
         {flat ? (
           <p className="mt-3 text-sm text-emerald-800">
-            Flat {flat.flatNumber} found. Choose purpose, enter the amount you
-            are paying, and continue below.
+            Flat {flat.flatNumber} found
+            {tenantName ? ` · ${tenantName}` : ""}. Review dues below, then pay.
+          </p>
+        ) : null}
+        {verificationError ? (
+          <p className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {verificationError} You can still pay manually by entering the amount.
           </p>
         ) : null}
       </form>
@@ -186,18 +268,36 @@ export default function PublicPayForm() {
           className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]"
         >
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <h2 className="text-lg font-bold text-slate-900">2. Pay via UPI</h2>
+            <h2 className="text-lg font-bold text-slate-900">2. Dues breakdown</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Enter the amount you owe, pay first, then submit your UTR for
-              owner confirmation.
+              Rent, maintenance, washer, parking, electricity, and other monthly
+              charges for {billingMonth}.
             </p>
 
-            <div className="mt-4 flex flex-wrap gap-2">
+            {breakdown ? (
+              <div className="mt-5 space-y-4">
+                <DuesBreakdownTable breakdown={breakdown} />
+                <button
+                  type="button"
+                  onClick={() => reloadDues(billingMonth)}
+                  className="text-sm font-semibold text-emerald-700"
+                >
+                  Refresh breakdown
+                </button>
+              </div>
+            ) : (
+              <p className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Dues breakdown is available when your mobile matches the tenant
+                record. Enter the amount manually below if needed.
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-wrap gap-2">
               {PURPOSES.map((p) => (
                 <button
                   key={p}
                   type="button"
-                  onClick={() => changePurpose(p)}
+                  onClick={() => setPurpose(p)}
                   className={`rounded-xl px-4 py-2 text-sm font-semibold ${
                     purpose === p
                       ? "bg-emerald-600 text-white"
@@ -214,17 +314,17 @@ export default function PublicPayForm() {
                 Amount to pay (₹)
               </span>
               <input
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="decimal"
                 required
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="Enter amount"
+                placeholder="e.g. 13562"
                 className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
               />
               <span className="mt-1 block text-xs text-slate-500">
-                Enter the amount yourself. Flat rent is not shown on this page.
+                Type the amount freely — no spinner arrows. Outstanding total is
+                prefilled when dues load.
               </span>
             </label>
 
@@ -265,9 +365,6 @@ export default function PublicPayForm() {
                     Enter an amount above to generate the UPI link and QR.
                   </p>
                 )}
-                <p className="text-xs text-slate-500">
-                  Tip: include flat {flat.flatNumber} in the UPI remark if asked.
-                </p>
               </div>
             )}
           </section>
@@ -286,6 +383,7 @@ export default function PublicPayForm() {
 
             <input type="hidden" name="purpose" value={purpose} />
             <input type="hidden" name="amount" value={amount} />
+            <input type="hidden" name="payer_phone" value={payerPhone} />
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <label className="block">
@@ -295,6 +393,7 @@ export default function PublicPayForm() {
                 <input
                   name="payer_name"
                   required
+                  defaultValue={tenantName ?? ""}
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>
@@ -303,48 +402,32 @@ export default function PublicPayForm() {
                   Mobile number
                 </span>
                 <input
-                  name="payer_phone"
-                  required
-                  inputMode="tel"
-                  placeholder="10-digit mobile"
+                  value={payerPhone}
+                  readOnly
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">
+                  Billing month
+                </span>
+                <input
+                  type="month"
+                  name="billing_month"
+                  required={purpose === "rent"}
+                  value={billingMonth}
+                  onChange={(e) => {
+                    setBillingMonth(e.target.value);
+                    reloadDues(e.target.value);
+                  }}
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>
-              {purpose === "rent" ? (
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">
-                    Billing month
-                  </span>
-                  <input
-                    type="month"
-                    name="billing_month"
-                    required
-                    value={billingMonth}
-                    onChange={(e) => setBillingMonth(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-                  />
-                </label>
-              ) : (
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">
-                    Period / month (optional)
-                  </span>
-                  <input
-                    type="month"
-                    name="billing_month"
-                    value={billingMonth}
-                    onChange={(e) => setBillingMonth(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-                  />
-                </label>
-              )}
               <p className="block text-sm text-slate-600 sm:col-span-2">
                 Amount submitted:{" "}
                 <span className="font-semibold text-slate-900">
-                  {amount && Number(amount) > 0 ? `₹${amount}` : "—"}
+                  {amountNum > 0 ? `₹${amount}` : "—"}
                 </span>
-                {" · "}
-                Enter or update the amount in step 2 before submitting.
               </p>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">
@@ -381,9 +464,6 @@ export default function PublicPayForm() {
                   accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-700"
                 />
-                <span className="mt-1 block text-xs text-slate-500">
-                  JPEG, PNG, WebP, or HEIC · max 5 MB
-                </span>
               </label>
               <label className="block sm:col-span-2">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">
@@ -392,13 +472,6 @@ export default function PublicPayForm() {
                 <textarea
                   name="notes"
                   rows={3}
-                  placeholder={
-                    purpose === "advance"
-                      ? "e.g. booking advance for move-in"
-                      : purpose === "maintenance"
-                        ? "e.g. monthly maintenance"
-                        : ""
-                  }
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>
@@ -417,7 +490,7 @@ export default function PublicPayForm() {
 
             <button
               type="submit"
-              disabled={pending || !amount}
+              disabled={pending || amountNum <= 0}
               className="mt-6 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
             >
               {pending ? "Submitting…" : "Submit for confirmation"}

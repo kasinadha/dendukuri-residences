@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
+import { uploadFlatQrImage } from "@/lib/flat-qr-upload";
 import {
   clearFlatSchemaCache,
   updateFlat,
@@ -92,6 +93,11 @@ export async function createFlatAction(
   };
 }
 
+function asFile(formData: FormData, key: string): File | null {
+  const value = formData.get(key);
+  return value instanceof File && value.size > 0 ? value : null;
+}
+
 export async function updateFlatAction(
   formData: FormData
 ): Promise<FlatWriteResult> {
@@ -99,6 +105,17 @@ export async function updateFlatAction(
   clearFlatSchemaCache();
   const property = await ensureDendukuriProperty(supabase);
   const id = asString(formData, "id");
+
+  let upiQrUrl = asString(formData, "upi_qr_url") || null;
+  const qrFile = asFile(formData, "upi_qr_file");
+  if (qrFile && id) {
+    const uploaded = await uploadFlatQrImage(supabase, {
+      flatId: id,
+      file: qrFile,
+    });
+    if (!uploaded.ok) return uploaded;
+    upiQrUrl = uploaded.path;
+  }
 
   const result = await updateFlat(supabase, id, {
     flatNumber: asString(formData, "flat_number"),
@@ -110,13 +127,14 @@ export async function updateFlatAction(
     maintenanceAmount: asOptionalNumber(formData, "maintenance_amount"),
     notes: asString(formData, "notes") || null,
     upiId: asString(formData, "upi_id") || null,
-    upiQrUrl: asString(formData, "upi_qr_url") || null,
+    upiQrUrl,
     property,
   });
 
   if (result.ok) {
     revalidateFlatPaths();
     revalidatePath("/tenant/pay");
+    revalidatePath("/pay");
   }
   return result;
 }

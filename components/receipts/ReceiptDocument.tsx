@@ -1,5 +1,6 @@
 import Link from "next/link";
 import PrintReceiptButton from "@/components/receipts/PrintReceiptButton";
+import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import type { ReceiptViewModel } from "@/lib/receipts";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
@@ -127,6 +128,17 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
             </dd>
           </div>
         </dl>
+
+        {receipt.duesBreakdown ? (
+          <div className="mt-8">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+              Payment breakdown
+            </h2>
+            <div className="mt-4">
+              <DuesBreakdownTable breakdown={receipt.duesBreakdown} />
+            </div>
+          </div>
+        ) : null}
 
         <footer className="mt-10 border-t border-slate-200 pt-5 text-xs text-slate-500">
           Issued {formatDisplayDate(receipt.createdAt)}. This receipt confirms

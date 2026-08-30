@@ -27,7 +27,8 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
 
     startTransition(async () => {
       const result = isEdit
@@ -40,7 +41,7 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
       }
 
       setSuccess(isEdit ? "Flat updated." : "Flat saved to Supabase.");
-      if (!isEdit) event.currentTarget.reset();
+      if (!isEdit) form.reset();
       onCancelEdit?.();
       router.refresh();
     });
@@ -49,6 +50,7 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
+      encType="multipart/form-data"
       className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
     >
       <h3 className="text-lg font-bold text-slate-900">
@@ -202,7 +204,23 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
 
         <label className="block sm:col-span-2">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            QR image URL (optional)
+            Upload QR image (per flat)
+          </span>
+          <input
+            name="upi_qr_file"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic"
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-700"
+          />
+          <span className="mt-1 block text-xs text-slate-500">
+            Upload a receive QR for this flat. JPEG, PNG, WebP, or HEIC · max 5
+            MB. Overrides the URL/path below when provided.
+          </span>
+        </label>
+
+        <label className="block sm:col-span-2">
+          <span className="mb-2 block text-sm font-semibold text-slate-700">
+            QR image URL (optional fallback)
           </span>
           <input
             name="upi_qr_url"

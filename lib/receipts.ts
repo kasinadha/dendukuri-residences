@@ -1,5 +1,9 @@
 import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  parseDuesBreakdownFromNotes,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
 import { PROPERTY_NAME } from "@/lib/property";
 
 export const BILLING_MONTH_NOTE_PREFIX = "billing_month:";
@@ -37,6 +41,7 @@ export type ReceiptViewModel = {
   rentAmount: number;
   amountDue: number | null;
   amountPaid: number;
+  duesBreakdown: DuesBreakdown | null;
   paymentDate: string;
   paymentMethod: string;
   transactionReference: string;
@@ -219,6 +224,7 @@ export function toReceiptViewModel(
   const tenant = unwrapOne(tenancy?.tenants ?? null);
   const flat = unwrapOne(tenancy?.flats ?? null);
   const { billingMonthKey } = parseBillingMonthFromNotes(payment.notes);
+  const duesBreakdown = parseDuesBreakdownFromNotes(payment.notes);
   const key =
     billingMonthKey ??
     payment.payment_date.slice(0, 7);
@@ -249,6 +255,7 @@ export function toReceiptViewModel(
     rentAmount: amountDue ?? paid,
     amountDue,
     amountPaid: paid,
+    duesBreakdown,
     paymentDate: payment.payment_date,
     paymentMethod: payment.payment_mode ?? "—",
     transactionReference: payment.transaction_reference?.trim() || "—",

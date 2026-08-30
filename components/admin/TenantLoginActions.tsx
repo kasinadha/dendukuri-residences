@@ -27,14 +27,22 @@ export default function TenantLoginActions({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [whatsappUrl, setWhatsappUrl] = useState<string | null>(null);
 
   function run(
-    action: (formData: FormData) => Promise<{ ok: true } | { ok: false; error: string } | { ok: true; loginEmail?: string }>,
+    action: (
+      formData: FormData
+    ) => Promise<
+      | { ok: true }
+      | { ok: false; error: string }
+      | { ok: true; loginEmail?: string; whatsappUrl?: string | null }
+    >,
     formData: FormData,
     okMessage: string
   ) {
     setError("");
     setSuccess("");
+    setWhatsappUrl(null);
     startTransition(async () => {
       try {
         const result = await action(formData);
@@ -47,6 +55,9 @@ export default function TenantLoginActions({
             ? ` Login email: ${result.loginEmail}`
             : "";
         setSuccess(okMessage + extra);
+        if ("whatsappUrl" in result && result.whatsappUrl) {
+          setWhatsappUrl(result.whatsappUrl);
+        }
         setOpen(false);
         router.refresh();
       } catch (err) {
@@ -90,6 +101,7 @@ export default function TenantLoginActions({
             setOpen(!open);
             setError("");
             setSuccess("");
+            setWhatsappUrl(null);
           }}
           className="text-xs font-semibold text-emerald-700"
         >
@@ -139,7 +151,7 @@ export default function TenantLoginActions({
             </p>
             <p className="mt-1 text-xs text-slate-600">
               Tenant signs in at /login with their 10-digit mobile and password.
-              Email below is optional.
+              After creating, send login details via WhatsApp.
             </p>
             <label className="block text-xs">
               <span className="mb-1 block font-semibold text-slate-700">
@@ -192,6 +204,16 @@ export default function TenantLoginActions({
 
       {error ? <p className="text-xs text-red-700">{error}</p> : null}
       {success ? <p className="text-xs text-emerald-700">{success}</p> : null}
+      {whatsappUrl ? (
+        <a
+          href={whatsappUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"
+        >
+          Send login details on WhatsApp
+        </a>
+      ) : null}
     </div>
   );
 }

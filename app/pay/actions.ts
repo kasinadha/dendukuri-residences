@@ -2,9 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  appendDuesBreakdownToNotes,
+  parseRupeeAmountInput,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
+import { resolveFlatQrDisplayUrl } from "@/lib/flat-qr-upload";
+import {
   uploadPublicPaymentProof,
   validatePaymentProofFile,
 } from "@/lib/payment-proofs";
+import {
+  getPublicPayDuesBreakdown,
+  verifyPublicPayTenantPhone,
+} from "@/lib/public-pay-dues";
 import {
   lookupFlatForPublicPay,
   submitPublicPaymentClaim,
@@ -29,27 +39,91 @@ function asPurpose(raw: string): PaymentPurpose | null {
   return null;
 }
 
-export async function lookupPublicFlatAction(formData: FormData) {
-  const supabase = await createClient();
-  const flatNumber = asString(formData, "flat_number");
-  const result = await lookupFlatForPublicPay(supabase, flatNumber);
-  if (!result.ok) return result;
+function parseBreakdownJson(raw: string): DuesBreakdown | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as DuesBreakdown;
+    if (!parsed || !Array.isArray(parsed.lines)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
+async function resolveFlatDisplay(flat: {
+  flatId: string;
+  flatNumber: string;
+  status: string | null;
+  upiId: string | null;
+  upiQrUrl: string | null;
+}) {
+  const supabase = await createClient();
+  const storedQrUrl = await resolveFlatQrDisplayUrl(supabase, flat.upiQrUrl);
   const upi = resolveRentUpiDisplay({
-    upiId: result.flat.upiId,
-    upiQrUrl: result.flat.upiQrUrl,
+    upiId: flat.upiId,
+    upiQrUrl: storedQrUrl,
   });
 
   return {
+    flatId: flat.flatId,
+    flatNumber: flat.flatNumber,
+    status: flat.status,
+    displayUpiId: upi.upiId,
+    displayUpiQrUrl: storedQrUrl || upi.upiQrUrl,
+    payeeName: upi.payeeName,
+  };
+}
+
+export async function lookupPublicFlatAction(formData: FormData) {
+  const supabase = await createClient();
+  const flatNumber = asString(formData, "flat_number");
+  const payerPhone = asString(formData, "payer_phone");
+  const billingMonth = asString(formData, "billing_month") || null;
+
+  const result = await lookupFlatForPublicPay(supabase, flatNumber);
+  if (!result.ok) return result;
+
+  const flat = await resolveFlatDisplay(result.flat);
+
+  if (!payerPhone) {
+    return {
+      ok: true as const,
+      flat,
+      tenantName: null,
+      breakdown: null,
+    };
+  }
+
+  const verified = await verifyPublicPayTenantPhone(
+    supabase,
+    flatNumber,
+    payerPhone
+  );
+  if (!verified.ok) {
+    return {
+      ok: true as const,
+      flat,
+      tenantName: null,
+      breakdown: null,
+      verificationError: verified.error,
+    };
+  }
+
+  let breakdown = null;
+  if (billingMonth && /^\d{4}-\d{2}$/.test(billingMonth)) {
+    const dues = await getPublicPayDuesBreakdown({
+      tenancyId: verified.tenancyId,
+      flatId: verified.flatId,
+      billingMonthKey: billingMonth,
+    });
+    if (dues.ok) breakdown = dues.breakdown;
+  }
+
+  return {
     ok: true as const,
-    flat: {
-      flatId: result.flat.flatId,
-      flatNumber: result.flat.flatNumber,
-      status: result.flat.status,
-      displayUpiId: upi.upiId,
-      displayUpiQrUrl: upi.upiQrUrl,
-      payeeName: upi.payeeName,
-    },
+    flat,
+    tenantName: verified.tenantName,
+    breakdown,
   };
 }
 
@@ -67,8 +141,8 @@ export async function submitPublicPayClaimAction(formData: FormData) {
       return { ok: false as const, error: "Flat number is required." };
     }
 
-    const amount = Number(asString(formData, "amount"));
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const amount = parseRupeeAmountInput(asString(formData, "amount"));
+    if (amount == null) {
       return { ok: false as const, error: "Enter a valid amount." };
     }
 
@@ -92,6 +166,9 @@ export async function submitPublicPayClaimAction(formData: FormData) {
     });
 
     const billingMonth = asString(formData, "billing_month") || null;
+    const breakdown = parseBreakdownJson(asString(formData, "dues_breakdown_json"));
+    const userNotes = asString(formData, "notes") || null;
+    const notes = appendDuesBreakdownToNotes(userNotes, breakdown);
 
     const result = await submitPublicPaymentClaim(supabase, {
       flatNumber,
@@ -102,7 +179,7 @@ export async function submitPublicPayClaimAction(formData: FormData) {
       payerName: asString(formData, "payer_name"),
       payerPhone: asString(formData, "payer_phone"),
       billingMonth: purpose === "rent" ? billingMonth : billingMonth,
-      notes: asString(formData, "notes") || null,
+      notes,
       upiId,
       proofPath,
     });

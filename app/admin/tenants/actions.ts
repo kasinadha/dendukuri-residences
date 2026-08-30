@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getTenantLoginUrl } from "@/lib/site-url";
 import { endTenancy, transferTenancy } from "@/lib/tenancies";
 import {
   createTenantPortalLogin,
   resetTenantPortalPassword,
 } from "@/lib/tenant-auth";
+import { tenantPortalInviteWhatsAppUrl } from "@/lib/tenant-portal-invite";
 import { updateTenantProfile, updateTenantTenancyTerms } from "@/lib/tenants";
 
 function asString(formData: FormData, key: string): string {
@@ -57,22 +59,59 @@ export async function transferTenantAction(formData: FormData) {
 }
 
 export async function createTenantLoginAction(formData: FormData) {
-  await requireAdmin();
+  const { supabase } = await requireAdmin();
   const adminResult = createAdminClient();
   if (!adminResult.ok) return adminResult;
 
+  const tenantId = asString(formData, "tenant_id");
+  const mobile = asString(formData, "mobile");
+  const password = asString(formData, "password");
+
   const result = await createTenantPortalLogin(adminResult.client, {
-    tenantId: asString(formData, "tenant_id"),
-    mobile: asString(formData, "mobile"),
-    password: asString(formData, "password"),
+    tenantId,
+    mobile,
+    password,
     email: asString(formData, "email") || null,
   });
 
   if (result.ok) {
     revalidatePath("/admin/tenants");
+
+    const { data: tenantRow } = await supabase
+      .from("tenants")
+      .select(
+        `
+        full_name,
+        phone,
+        tenancies (
+          flats ( flat_number )
+        )
+      `
+      )
+      .eq("id", tenantId)
+      .maybeSingle();
+
+    const tenancy = Array.isArray(tenantRow?.tenancies)
+      ? tenantRow.tenancies[0]
+      : tenantRow?.tenancies;
+    const flat = Array.isArray(tenancy?.flats)
+      ? tenancy.flats[0]
+      : tenancy?.flats;
+
+    const loginUrl = await getTenantLoginUrl();
+    const whatsappUrl = tenantPortalInviteWhatsAppUrl({
+      tenantPhone: tenantRow?.phone ?? mobile,
+      tenantName: tenantRow?.full_name?.trim() || "Tenant",
+      flatNumber: flat?.flat_number ?? null,
+      mobile,
+      password,
+      loginUrl,
+    });
+
     return {
       ok: true as const,
       loginEmail: result.loginEmail,
+      whatsappUrl,
     };
   }
   return result;
