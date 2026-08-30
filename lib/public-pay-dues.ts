@@ -6,6 +6,7 @@ import {
   parseDuesBreakdownFromNotes,
 } from "@/lib/dues-breakdown";
 import { listElectricityReadings } from "@/lib/electricity";
+import { roundElectricityDue } from "@/lib/electricity-billing";
 import { getTenantMonthDue } from "@/lib/reminders";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -135,7 +136,7 @@ export async function getTenancyDuesBreakdown(
   );
 
   if (electricity && num(electricity.billAmount) > 0) {
-    const bill = num(electricity.billAmount);
+    const bill = roundElectricityDue(num(electricity.billAmount));
     lines.push({
       key: "electricity",
       label: "Electricity",
@@ -171,7 +172,7 @@ export async function getPublicPayDuesBreakdown(input: {
   return getTenancyDuesBreakdown(admin.client, input);
 }
 
-/** Use stored breakdown on payment notes, or compute from tenancy for older receipts. */
+/** Recompute breakdown from ledger + bills; fall back to stored notes if needed. */
 export async function resolveReceiptDuesBreakdown(
   supabase: SupabaseClient,
   input: {
@@ -181,20 +182,16 @@ export async function resolveReceiptDuesBreakdown(
     billingMonthKey: string | null;
   }
 ): Promise<DuesBreakdown | null> {
-  const stored = parseDuesBreakdownFromNotes(input.notes);
-  if (stored) return stored;
-
-  if (!input.tenancyId || !input.flatId || !input.billingMonthKey) {
-    return null;
+  if (input.tenancyId && input.flatId && input.billingMonthKey) {
+    const computed = await getTenancyDuesBreakdown(supabase, {
+      tenancyId: input.tenancyId,
+      flatId: input.flatId,
+      billingMonthKey: input.billingMonthKey,
+    });
+    if (computed.ok) return computed.breakdown;
   }
 
-  const computed = await getTenancyDuesBreakdown(supabase, {
-    tenancyId: input.tenancyId,
-    flatId: input.flatId,
-    billingMonthKey: input.billingMonthKey,
-  });
-
-  return computed.ok ? computed.breakdown : null;
+  return parseDuesBreakdownFromNotes(input.notes);
 }
 
 export function parseDuesBreakdownJson(raw: string): DuesBreakdown | null {

@@ -166,6 +166,31 @@ export function formatReceiptShareMessage(
   return lines.join("\n");
 }
 
+/** Short WhatsApp caption when the full receipt is attached as a PDF. */
+export function formatReceiptPdfShareMessage(
+  receipt: Pick<
+    ReceiptViewModel,
+    | "tenantName"
+    | "propertyName"
+    | "flatNumber"
+    | "billingMonth"
+    | "receiptNumber"
+    | "amountPaid"
+  >
+): string {
+  return [
+    `Hi ${receipt.tenantName},`,
+    "",
+    `Please find attached your rent receipt for ${receipt.billingMonth}.`,
+    "",
+    `Flat: ${receipt.flatNumber}`,
+    `Receipt no: ${receipt.receiptNumber}`,
+    `Amount paid: ${formatInr(receipt.amountPaid)}`,
+    "",
+    `— ${receipt.propertyName}`,
+  ].join("\n");
+}
+
 function formatPaymentMethodLabel(value: string): string {
   const map: Record<string, string> = {
     upi: "UPI",
@@ -339,15 +364,15 @@ async function enrichReceiptViewModel(
   payment: PaymentJoinRow
 ): Promise<ReceiptViewModel> {
   const view = toReceiptViewModel(receipt, payment);
-  if (view.duesBreakdown) return view;
-
   const tenancy = unwrapOne(payment.tenancies);
   const flat = unwrapOne(tenancy?.flats ?? null);
+  const tenancyId = payment.tenancy_id ?? tenancy?.id ?? null;
+  const flatId = flat?.id ?? null;
 
   const computed = await resolveReceiptDuesBreakdown(supabase, {
     notes: payment.notes,
-    tenancyId: payment.tenancy_id ?? tenancy?.id ?? null,
-    flatId: flat?.id ?? null,
+    tenancyId,
+    flatId,
     billingMonthKey: view.billingMonthKey,
   });
 

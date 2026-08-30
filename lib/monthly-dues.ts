@@ -1,4 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  allocatePaymentsAcrossLines,
+  type DuesBreakdownLine,
+} from "@/lib/dues-breakdown";
+import { roundElectricityDue } from "@/lib/electricity-billing";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
 import {
   applyOverdueIfNeeded,
@@ -51,6 +56,7 @@ export type MonthlyDuesLedgerRow = {
   otherMonthlyCharge: number;
   otherChargesNotes: string | null;
   chargesDue: number;
+  electricityCharge: number;
   totalDue: number;
   rentPaid: number;
   chargesPaid: number;
@@ -86,7 +92,7 @@ const TENANCY_SELECT_FULL = `
   other_monthly_charge,
   other_charges_notes,
   tenants ( full_name ),
-  flats ( flat_number, maintenance_amount )
+  flats ( id, flat_number, maintenance_amount )
 `;
 
 const TENANCY_SELECT_FALLBACK = `
@@ -94,7 +100,7 @@ const TENANCY_SELECT_FALLBACK = `
   status,
   monthly_rent,
   tenants ( full_name ),
-  flats ( flat_number, maintenance_amount )
+  flats ( id, flat_number, maintenance_amount )
 `;
 
 async function loadActiveTenancies(supabase: SupabaseClient) {
@@ -113,8 +119,106 @@ async function loadActiveTenancies(supabase: SupabaseClient) {
   return [];
 }
 
+async function loadElectricityDueByFlatId(
+  supabase: SupabaseClient,
+  billingMonthKey: string
+): Promise<Map<string, number>> {
+  const { data: runs, error: runsError } = await supabase
+    .from("electricity_billing_runs")
+    .select("id")
+    .eq("billing_month", billingMonthKey);
+
+  if (runsError || !runs?.length) return new Map();
+
+  const runIds = runs.map((row) => row.id);
+  const { data: readings, error: readingsError } = await supabase
+    .from("electricity_readings")
+    .select("flat_id, bill_amount")
+    .in("billing_run_id", runIds);
+
+  if (readingsError || !readings) return new Map();
+
+  const byFlat = new Map<string, number>();
+  for (const row of readings) {
+    const bill = roundElectricityDue(num(row.bill_amount));
+    if (bill <= 0) continue;
+    const flatId = String(row.flat_id);
+    byFlat.set(flatId, (byFlat.get(flatId) ?? 0) + bill);
+  }
+  return byFlat;
+}
+
+function buildMonthlyDuesLines(input: {
+  rentDue: number;
+  maintenanceCharge: number;
+  carParkingCharge: number;
+  washingMachineCharge: number;
+  otherMonthlyCharge: number;
+  otherChargesNotes: string | null;
+  electricityCharge: number;
+}): DuesBreakdownLine[] {
+  const lines: DuesBreakdownLine[] = [];
+
+  if (input.rentDue > 0) {
+    lines.push({
+      key: "rent",
+      label: "Rent",
+      due: input.rentDue,
+      paid: 0,
+      outstanding: input.rentDue,
+    });
+  }
+  if (input.maintenanceCharge > 0) {
+    lines.push({
+      key: "maintenance",
+      label: "Maintenance",
+      due: input.maintenanceCharge,
+      paid: 0,
+      outstanding: input.maintenanceCharge,
+    });
+  }
+  if (input.carParkingCharge > 0) {
+    lines.push({
+      key: "parking",
+      label: "Car parking",
+      due: input.carParkingCharge,
+      paid: 0,
+      outstanding: input.carParkingCharge,
+    });
+  }
+  if (input.washingMachineCharge > 0) {
+    lines.push({
+      key: "washer",
+      label: "Washing machine",
+      due: input.washingMachineCharge,
+      paid: 0,
+      outstanding: input.washingMachineCharge,
+    });
+  }
+  if (input.otherMonthlyCharge > 0) {
+    lines.push({
+      key: "other",
+      label: input.otherChargesNotes?.trim() || "Other monthly",
+      due: input.otherMonthlyCharge,
+      paid: 0,
+      outstanding: input.otherMonthlyCharge,
+    });
+  }
+  if (input.electricityCharge > 0) {
+    lines.push({
+      key: "electricity",
+      label: "Electricity",
+      due: input.electricityCharge,
+      paid: 0,
+      outstanding: input.electricityCharge,
+    });
+  }
+
+  return lines;
+}
+
 /**
- * Monthly dues for active tenancies: rent + maintenance + parking + washer + other.
+ * Monthly dues for active tenancies: rent + monthly charges + electricity.
  * Payments counted: rent + maintenance for the billing month (advance excluded).
  */
 export async function getMonthlyDuesSummary(
@@ -124,7 +228,10 @@ export async function getMonthlyDuesSummary(
   const monthKey = billingMonthKey?.trim() || currentMonthKey();
   const nowKey = currentMonthKey();
 
-  const tenancyRows = await loadActiveTenancies(supabase);
+  const [tenancyRows, electricityByFlatId] = await Promise.all([
+    loadActiveTenancies(supabase),
+    loadElectricityDueByFlatId(supabase, monthKey),
+  ]);
   const active = tenancyRows.filter((row) =>
     isActiveTenancyStatus(row.status)
   );
@@ -227,11 +334,24 @@ export async function getMonthlyDuesSummary(
 
     const rentDue = num(row.monthly_rent);
     const chargesDue = charges.totalMonthlyCharges;
-    const totalDue = rentDue + chargesDue;
+    const electricityCharge = electricityByFlatId.get(flat?.id ?? "") ?? 0;
+    const lines = buildMonthlyDuesLines({
+      rentDue,
+      maintenanceCharge: charges.maintenanceCharge,
+      carParkingCharge: charges.carParkingCharge,
+      washingMachineCharge: charges.washingMachineCharge,
+      otherMonthlyCharge: charges.otherMonthlyCharge,
+      otherChargesNotes: charges.otherChargesNotes,
+      electricityCharge,
+    });
+    const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
     const paidInfo = paidByTenancy.get(row.id);
     const rentPaid = paidInfo?.rentPaid ?? 0;
     const chargesPaid = paidInfo?.chargesPaid ?? 0;
     const amountPaid = rentPaid + chargesPaid;
+
+    allocatePaymentsAcrossLines(lines, amountPaid);
+    const outstanding = lines.reduce((sum, line) => sum + line.outstanding, 0);
 
     let status: PaymentStatus = paidInfo?.waived
       ? "waived"
@@ -250,12 +370,12 @@ export async function getMonthlyDuesSummary(
       otherMonthlyCharge: charges.otherMonthlyCharge,
       otherChargesNotes: charges.otherChargesNotes,
       chargesDue,
+      electricityCharge,
       totalDue,
       rentPaid,
       chargesPaid,
       amountPaid,
-      outstanding:
-        status === "waived" ? 0 : Math.max(0, totalDue - amountPaid),
+      outstanding: status === "waived" ? 0 : outstanding,
       status,
       lastPaymentId: paidInfo?.lastPaymentId ?? null,
       lastReceiptId: paidInfo?.lastReceiptId ?? null,
@@ -301,6 +421,9 @@ export function formatMonthlyDuesBreakdown(row: MonthlyDuesLedgerRow): string {
   }
   if (row.otherMonthlyCharge > 0) {
     parts.push(`other ${row.otherMonthlyCharge}`);
+  }
+  if (row.electricityCharge > 0) {
+    parts.push(`electricity ${row.electricityCharge}`);
   }
   return parts.length ? parts.join(" + ") : "no monthly charges";
 }

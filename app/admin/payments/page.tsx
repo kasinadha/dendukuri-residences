@@ -158,7 +158,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
           {
             title: "Dues expected",
             value: formatInr(monthSummary.totalExpected),
-            detail: "Rent + monthly charges",
+            detail: "Rent + monthly charges + electricity",
           },
           {
             title: "Collected",
@@ -243,8 +243,16 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     <p className="mt-1 text-sm text-slate-500">
                       Due {formatInr(row.totalDue)} · Paid{" "}
                       {formatInr(row.amountPaid)}
-                      {row.chargesDue > 0
-                        ? ` (rent ${formatInr(row.rentDue)} + charges ${formatInr(row.chargesDue)})`
+                      {row.chargesDue > 0 || row.electricityCharge > 0
+                        ? ` (rent ${formatInr(row.rentDue)}${
+                            row.chargesDue > 0
+                              ? ` + charges ${formatInr(row.chargesDue)}`
+                              : ""
+                          }${
+                            row.electricityCharge > 0
+                              ? ` + electricity ${formatInr(row.electricityCharge)}`
+                              : ""
+                          })`
                         : ""}
                       {row.outstanding > 0
                         ? ` · Outstanding ${formatInr(row.outstanding)}`

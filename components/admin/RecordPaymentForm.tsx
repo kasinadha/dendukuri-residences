@@ -53,6 +53,17 @@ function todayIsoDate(): string {
   }).format(new Date());
 }
 
+function paymentAmountDefaults(breakdown: DuesBreakdown): {
+  amountDue: string;
+  amountPaid: string;
+} {
+  return {
+    amountDue: String(breakdown.totalDue),
+    amountPaid:
+      breakdown.totalOutstanding > 0 ? String(breakdown.totalOutstanding) : "",
+  };
+}
+
 type Props = {
   tenancies: TenancyOption[];
   accounts: PaymentAccountOption[];
@@ -106,8 +117,9 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
       }
       setBreakdownError("");
       setBreakdown(result.breakdown);
-      setAmountDue(String(result.breakdown.totalOutstanding || result.breakdown.totalDue));
-      setAmountPaid(String(result.breakdown.totalOutstanding || result.breakdown.totalDue));
+      const defaults = paymentAmountDefaults(result.breakdown);
+      setAmountDue(defaults.amountDue);
+      setAmountPaid(defaults.amountPaid);
     });
     return () => {
       cancelled = true;
@@ -234,11 +246,10 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
             Amount due (₹)
           </span>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             name="amount_due"
             required
-            min={0}
-            step={1}
             value={amountDue}
             onChange={(e) => setAmountDue(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
@@ -250,11 +261,10 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
             Amount paid (₹)
           </span>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             name="amount_paid"
             required
-            min={0}
-            step={1}
             value={amountPaid}
             onChange={(e) => setAmountPaid(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
