@@ -4,11 +4,11 @@ import {
 } from "@/lib/electricity-occupancy";
 
 /**
- * Whether rent and monthly charges (maintenance, parking, etc.) are due for
- * this billing month. Requires a move-in date; move-in month and earlier are
- * excluded — rent starts the month after move-in.
+ * Shared rules for rent, monthly charges, and electricity.
+ * - Requires move-in date; move-in month and earlier months: no dues.
+ * - Vacate month still included (overlap via end_date); later months excluded.
  */
-export function tenancyOwesMonthlyRent(
+export function tenancyOwesMonthlyDues(
   tenancy: TenancyForBillingOverlap,
   billingMonthKey: string
 ): boolean {
@@ -21,4 +21,19 @@ export function tenancyOwesMonthlyRent(
   if (billingMonthKey <= startMonth) return false;
 
   return true;
+}
+
+/** @deprecated Use tenancyOwesMonthlyDues — same rules for all due types. */
+export function tenancyOwesMonthlyRent(
+  tenancy: TenancyForBillingOverlap,
+  billingMonthKey: string
+): boolean {
+  return tenancyOwesMonthlyDues(tenancy, billingMonthKey);
+}
+
+export function tenancyIncludedInMonthlyLedger(
+  tenancy: TenancyForBillingOverlap,
+  billingMonthKey: string
+): boolean {
+  return tenancyOverlapsBillingMonth(tenancy, billingMonthKey);
 }

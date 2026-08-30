@@ -95,7 +95,8 @@ export default function UnpaidRentRemindersPanel({
         </h3>
         <p className="mt-1 text-sm text-slate-500">
           Rent plus maintenance, parking, washer, other monthly charges, and
-          electricity. Move-in month is excluded; rent starts the next month.
+          electricity. Move-in month has no dues; vacating tenants appear for
+          their final month only (set vacate date to close the account).
           {whatsappApiEnabled
             ? " Send directly from your business WhatsApp API, or open a draft in WhatsApp Web."
             : " Open WhatsApp with a pre-filled message, then mark reminded."}

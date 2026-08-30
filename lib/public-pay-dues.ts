@@ -5,15 +5,8 @@ import {
   computeBreakdownTotals,
   parseDuesBreakdownFromNotes,
 } from "@/lib/dues-breakdown";
-import { listElectricityReadings } from "@/lib/electricity";
-import { roundElectricityDue } from "@/lib/electricity-billing";
 import { getTenantMonthDue } from "@/lib/reminders";
 import { createAdminClient } from "@/lib/supabase/admin";
-
-function num(value: unknown): number {
-  const n = typeof value === "string" ? Number(value) : Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
 
 export async function verifyPublicPayTenantPhone(
   supabase: SupabaseClient,
@@ -72,7 +65,7 @@ export async function getTenancyDuesBreakdown(
   );
 
   if (!monthDue) {
-    return { ok: false, error: "No active tenancy dues found for this period." };
+    return { ok: false, error: "No tenancy dues found for this period." };
   }
 
   const lines: DuesBreakdownLine[] = [];
@@ -127,22 +120,13 @@ export async function getTenancyDuesBreakdown(
     });
   }
 
-  const electricityRows = await listElectricityReadings(supabase, {
-    flatId: input.flatId,
-    limit: 12,
-  });
-  const electricity = electricityRows.find(
-    (row) => row.billingMonth === input.billingMonthKey && num(row.billAmount) > 0
-  );
-
-  if (electricity && num(electricity.billAmount) > 0) {
-    const bill = roundElectricityDue(num(electricity.billAmount));
+  if (monthDue.electricityCharge > 0) {
     lines.push({
       key: "electricity",
       label: "Electricity",
-      due: bill,
+      due: monthDue.electricityCharge,
       paid: 0,
-      outstanding: bill,
+      outstanding: monthDue.electricityCharge,
     });
   }
 
