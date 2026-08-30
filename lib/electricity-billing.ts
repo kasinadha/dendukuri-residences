@@ -33,8 +33,8 @@ export function basicChargeForSanctionedKw(
 
 /**
  * Per-flat bill:
- * ((flat units + common share) × rate per unit + basic charge per kW × sanctioned kW)
- * × (1 + service charge %)
+ * ((flat units + common share) × rate per unit) + service % on energy only
+ * + basic charge per kW × sanctioned kW
  */
 export function calculateFlatElectricityBill(input: {
   flatUnits: number;
@@ -50,10 +50,10 @@ export function calculateFlatElectricityBill(input: {
   const energyUnitsTotal = flatUnits + commonShareUnits;
   const energyCharge = energyUnitsTotal * config.ratePerUnit;
   const basicCharge = basicChargeForSanctionedKw(sanctionedKw, config);
-  const subtotalBeforeService = energyCharge + basicCharge;
   const serviceCharge =
-    subtotalBeforeService * (config.serviceChargePercent / 100);
-  const totalDue = subtotalBeforeService + serviceCharge;
+    energyCharge * (config.serviceChargePercent / 100);
+  const subtotalBeforeService = energyCharge + serviceCharge;
+  const totalDue = subtotalBeforeService + basicCharge;
 
   return {
     flatUnits,
@@ -90,7 +90,7 @@ export function formatElectricityFormulaSummary(
   breakdown: FlatElectricityBillBreakdown,
   config: ElectricityBillingConfig = DEFAULT_ELECTRICITY_BILLING_CONFIG
 ): string {
-  return `(${breakdown.flatUnits} + ${roundDisplay(breakdown.commonShareUnits)} units) × ₹${config.ratePerUnit} + basic ₹${config.basicChargePerKw}/kW + ${config.serviceChargePercent}% service`;
+  return `((${breakdown.flatUnits} + ${roundDisplay(breakdown.commonShareUnits)} units) × ₹${config.ratePerUnit}) + ${config.serviceChargePercent}% service + basic ₹${config.basicChargePerKw}/kW`;
 }
 
 function roundDisplay(value: number): string {
