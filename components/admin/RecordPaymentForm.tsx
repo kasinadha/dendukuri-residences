@@ -67,16 +67,25 @@ function paymentAmountDefaults(breakdown: DuesBreakdown): {
 type Props = {
   tenancies: TenancyOption[];
   accounts: PaymentAccountOption[];
+  defaultTenancyId?: string;
+  defaultBillingMonth?: string;
 };
 
-export default function RecordPaymentForm({ tenancies, accounts }: Props) {
+export default function RecordPaymentForm({
+  tenancies,
+  accounts,
+  defaultTenancyId,
+  defaultBillingMonth,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [tenancyId, setTenancyId] = useState(tenancies[0]?.id ?? "");
+  const initialTenancy =
+    tenancies.find((t) => t.id === defaultTenancyId) ?? tenancies[0];
+  const [tenancyId, setTenancyId] = useState(initialTenancy?.id ?? "");
   const [receiverAccountId, setReceiverAccountId] = useState(
-    tenancies[0]?.suggestedReceiverAccountId ?? ""
+    initialTenancy?.suggestedReceiverAccountId ?? ""
   );
   const selected = tenancies.find((t) => t.id === tenancyId) ?? tenancies[0];
   const [amountDue, setAmountDue] = useState(
@@ -85,7 +94,9 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
   const [amountPaid, setAmountPaid] = useState(
     selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
   );
-  const [billingMonth, setBillingMonth] = useState(currentYearMonth());
+  const [billingMonth, setBillingMonth] = useState(
+    defaultBillingMonth ?? currentYearMonth()
+  );
   const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
   const [breakdownError, setBreakdownError] = useState("");
 
@@ -161,8 +172,7 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
   if (tenancies.length === 0) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-        No active tenancies found. Confirmed/reserved units (before move-in)
-        are excluded from rent recording.
+        No tenancies available for payment recording this month.
       </div>
     );
   }
@@ -175,7 +185,8 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
     >
       <h3 className="text-lg font-bold text-slate-900">Record Payment</h3>
       <p className="mt-1 text-sm text-slate-500">
-        Against an active tenancy. Issues a unique receipt automatically.
+        Active tenancies and vacated tenants with outstanding final-month dues.
+        Issues a unique receipt automatically.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -192,8 +203,8 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
           >
             {tenancies.map((t) => (
               <option key={t.id} value={t.id}>
-                Flat {t.flatNumber} — {t.tenantName}
-                {t.monthlyRent != null ? ` (₹${t.monthlyRent})` : ""}
+                {t.label}
+                {t.monthlyRent != null ? ` · rent ₹${t.monthlyRent}` : ""}
               </option>
             ))}
           </select>
