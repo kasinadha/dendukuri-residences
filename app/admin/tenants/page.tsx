@@ -1,11 +1,12 @@
 import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
+import FormerTenantActions from "@/components/admin/FormerTenantActions";
 import TenantDetailsEditor from "@/components/admin/TenantDetailsEditor";
 import TenantLoginActions from "@/components/admin/TenantLoginActions";
 import TenantOccupancyActions from "@/components/admin/TenantOccupancyActions";
 import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin } from "@/lib/flats";
-import { formatInr } from "@/lib/receipts";
+import { formatDisplayDate, formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
 import { listUnpaidRentReminders } from "@/lib/reminders";
 
@@ -17,6 +18,7 @@ export default async function TenantsPage({
   const { supabase } = await requireAdmin();
   const params = (await searchParams) ?? {};
   const showFormer = params.show === "former" || params.show === "all";
+  const showArchived = params.show === "archived";
 
   const [tenants, flats, unpaidDues] = await Promise.all([
     listTenantsForAdmin(supabase),
@@ -24,9 +26,16 @@ export default async function TenantsPage({
     listUnpaidRentReminders(supabase),
   ]);
 
-  const activeTenants = tenants.filter((t) => t.hasActiveTenancy);
-  const formerTenants = tenants.filter((t) => !t.hasActiveTenancy);
-  const visibleTenants = showFormer ? tenants : activeTenants;
+  const nonArchivedTenants = tenants.filter((t) => !t.isArchived);
+  const activeTenants = nonArchivedTenants.filter((t) => t.hasActiveTenancy);
+  const formerTenants = nonArchivedTenants.filter((t) => !t.hasActiveTenancy);
+  const archivedCount = tenants.filter((t) => t.isArchived).length;
+
+  const visibleTenants = showArchived
+    ? tenants.filter((t) => t.isArchived)
+    : nonArchivedTenants;
+
+  const listedTenants = showFormer || showArchived ? visibleTenants : activeTenants;
   const vacantFlats = flats
     .filter((f) => !f.isOccupied)
     .map((f) => ({
@@ -57,11 +66,28 @@ export default async function TenantsPage({
               {formerTenants.length} former
             </span>
           ) : null}
+          {archivedCount > 0 ? (
+            <span className="rounded-xl bg-white px-3 py-2 font-semibold text-slate-500 shadow-sm ring-1 ring-slate-200">
+              {archivedCount} archived
+            </span>
+          ) : null}
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-        {showFormer ? (
+        {showArchived ? (
+          <>
+            <span className="font-semibold text-slate-700">
+              Showing archived tenants
+            </span>
+            <Link
+              href="/admin/tenants"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm"
+            >
+              Active only
+            </Link>
+          </>
+        ) : showFormer ? (
           <>
             <span className="font-semibold text-slate-700">
               Showing all tenants (active + former)
@@ -72,6 +98,14 @@ export default async function TenantsPage({
             >
               Active only
             </Link>
+            {archivedCount > 0 ? (
+              <Link
+                href="/admin/tenants?show=archived"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm"
+              >
+                Archived ({archivedCount})
+              </Link>
+            ) : null}
           </>
         ) : (
           <>
@@ -84,6 +118,14 @@ export default async function TenantsPage({
                 className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm"
               >
                 Show former ({formerTenants.length})
+              </Link>
+            ) : null}
+            {archivedCount > 0 ? (
+              <Link
+                href="/admin/tenants?show=archived"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm"
+              >
+                Archived ({archivedCount})
               </Link>
             ) : null}
           </>
@@ -109,11 +151,13 @@ export default async function TenantsPage({
       ) : null}
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {visibleTenants.length === 0 ? (
+        {listedTenants.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
-            {showFormer
-              ? "No tenants found. Add tenants in Supabase to see them here."
-              : "No active tenants right now."}
+            {showArchived
+              ? "No archived tenants."
+              : showFormer
+                ? "No tenants found. Add tenants in Supabase to see them here."
+                : "No active tenants right now."}
           </p>
         ) : (
           <>
@@ -131,7 +175,7 @@ export default async function TenantsPage({
               <span>Details</span>
             </div>
             <ul className="divide-y divide-slate-100">
-              {visibleTenants.map((tenant) => (
+              {listedTenants.map((tenant) => (
                 <li
                   key={tenant.id}
                   className="grid gap-2 px-5 py-4 lg:grid-cols-[0.9fr_0.85fr_0.5fr_0.45fr_0.55fr_0.75fr_0.75fr_0.5fr_0.8fr_0.75fr_0.9fr] lg:items-start lg:gap-2 lg:px-6"
@@ -161,6 +205,11 @@ export default async function TenantsPage({
                     </p>
                     <p className="text-sm font-semibold text-slate-900">
                       {tenant.flatNumber ?? "—"}
+                      {!tenant.hasActiveTenancy && tenant.lastFlatNumber ? (
+                        <span className="ml-1 text-xs font-normal text-slate-500">
+                          (last)
+                        </span>
+                      ) : null}
                     </p>
                   </div>
                   <div>
@@ -266,7 +315,11 @@ export default async function TenantsPage({
                           : "bg-slate-100 text-slate-600"
                       }`}
                     >
-                      {tenant.tenancyStatus ?? "no tenancy"}
+                      {tenant.hasActiveTenancy
+                        ? tenant.tenancyStatus ?? "active"
+                        : tenant.vacatedDate
+                          ? `vacated · ${formatDisplayDate(tenant.vacatedDate)}`
+                          : tenant.tenancyStatus ?? "former"}
                     </span>
                   </div>
                   <div>
@@ -291,10 +344,16 @@ export default async function TenantsPage({
                         vacantFlats={vacantFlats}
                         currentRent={tenant.monthlyRent}
                       />
+                    ) : tenant.isArchived ? (
+                      <p className="text-sm text-slate-500">Archived</p>
                     ) : (
-                      <p className="text-sm text-slate-500">
-                        {tenant.tenancyStatus ? "No active occupancy" : "—"}
-                      </p>
+                      <FormerTenantActions
+                        tenantId={tenant.id}
+                        tenantName={tenant.fullName}
+                        endedTenancyId={tenant.endedTenancyId}
+                        vacatedDate={tenant.vacatedDate}
+                        lastFlatNumber={tenant.lastFlatNumber}
+                      />
                     )}
                   </div>
                   <div>

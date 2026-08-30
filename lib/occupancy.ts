@@ -6,6 +6,17 @@ export function isActiveTenancyStatus(status: string | null | undefined): boolea
   return value === "active" || value === "occupied" || value === "";
 }
 
+export function isEndedTenancyStatus(status: string | null | undefined): boolean {
+  const value = (status ?? "").toLowerCase();
+  return (
+    value === "vacated" ||
+    value === "ended" ||
+    value === "terminated" ||
+    value === "cancelled" ||
+    value === "transferred"
+  );
+}
+
 export function isOccupiedFlatStatus(status: string | null | undefined): boolean {
   const value = (status ?? "").toLowerCase();
   // "reserved" is inventory hold — NOT occupied for rent expected.

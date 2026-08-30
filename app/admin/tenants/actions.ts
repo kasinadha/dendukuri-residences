@@ -8,7 +8,12 @@ import {
   createTenantPortalLogin,
   resetTenantPortalPassword,
 } from "@/lib/tenant-auth";
-import { updateTenantProfile, updateTenantTenancyTerms } from "@/lib/tenants";
+import {
+  archiveTenant,
+  recordTenancyVacateDate,
+  updateTenantProfile,
+  updateTenantTenancyTerms,
+} from "@/lib/tenants";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -37,7 +42,31 @@ export async function markTenantVacatedAction(formData: FormData) {
   const result = await endTenancy(supabase, {
     tenancyId,
     endDate: asString(formData, "end_date") || null,
-    status: "ended",
+    status: "vacated",
+  });
+  if (result.ok) revalidateOccupancy();
+  return result;
+}
+
+export async function archiveTenantAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tenantId = asString(formData, "tenant_id");
+  if (!tenantId) return { ok: false as const, error: "Missing tenant." };
+
+  const result = await archiveTenant(supabase, tenantId);
+  if (result.ok) revalidateOccupancy();
+  return result;
+}
+
+export async function recordVacateDateAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tenancyId = asString(formData, "tenancy_id");
+  const endDate = asString(formData, "end_date");
+  if (!tenancyId) return { ok: false as const, error: "Missing tenancy." };
+
+  const result = await recordTenancyVacateDate(supabase, {
+    tenancyId,
+    endDate,
   });
   if (result.ok) revalidateOccupancy();
   return result;
