@@ -29,6 +29,7 @@ export type TenantListItem = {
   isArchived: boolean;
   profileId: string | null;
   hasPortalLogin: boolean;
+  moveInDate: string | null;
 };
 
 function num(value: unknown): number | null {
@@ -429,6 +430,44 @@ export async function recordTenancyVacateDate(
   return { ok: true };
 }
 
+export async function updateTenancyMoveInDate(
+  supabase: SupabaseClient,
+  input: { tenancyId: string; startDate: string | null }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tenancyId = input.tenancyId.trim();
+  if (!tenancyId) return { ok: false, error: "Missing tenancy." };
+
+  const startDate = input.startDate?.trim() || null;
+  if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    return { ok: false, error: "Move-in date must be YYYY-MM-DD." };
+  }
+
+  const { data: tenancy, error: loadError } = await supabase
+    .from("tenancies")
+    .select("id, status")
+    .eq("id", tenancyId)
+    .maybeSingle();
+
+  if (loadError || !tenancy) {
+    return { ok: false, error: loadError?.message ?? "Tenancy not found." };
+  }
+
+  if (!isActiveTenancyStatus(tenancy.status)) {
+    return {
+      ok: false,
+      error: "Move-in date can only be set on an active tenancy.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("tenancies")
+    .update({ start_date: startDate })
+    .eq("id", tenancyId);
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function listTenantsForAdmin(
   supabase: SupabaseClient
 ): Promise<TenantListItem[]> {
@@ -590,6 +629,7 @@ function mapTenantRows(
       isArchived: Boolean(row.archived_at),
       profileId: row.profile_id ?? null,
       hasPortalLogin: Boolean(row.profile_id),
+      moveInDate: activeTenancy?.start_date ?? null,
     };
   });
 }

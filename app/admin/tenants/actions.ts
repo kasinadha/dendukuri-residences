@@ -14,7 +14,9 @@ import {
   recordTenancyVacateDate,
   updateTenantProfile,
   updateTenantTenancyTerms,
+  updateTenancyMoveInDate,
 } from "@/lib/tenants";
+import { syncMoveInDatesFromPaymentCsv } from "@/lib/sync-move-in-dates";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -179,4 +181,27 @@ export async function updateTenantTermsAction(formData: FormData) {
     revalidatePath("/admin/flats");
   }
   return result;
+}
+
+export async function updateTenancyMoveInDateAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tenancyId = asString(formData, "tenancy_id");
+  if (!tenancyId) return { ok: false as const, error: "Missing tenancy." };
+
+  const result = await updateTenancyMoveInDate(supabase, {
+    tenancyId,
+    startDate: asString(formData, "start_date") || null,
+  });
+
+  if (result.ok) revalidateOccupancy();
+  return result;
+}
+
+export async function syncMoveInDatesFromCsvAction() {
+  const { supabase } = await requireAdmin();
+  const summary = await syncMoveInDatesFromPaymentCsv(supabase);
+  if (summary.errors.length === 0) {
+    revalidateOccupancy();
+  }
+  return { ok: true as const, summary };
 }
