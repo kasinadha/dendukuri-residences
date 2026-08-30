@@ -100,8 +100,18 @@ export default async function PaymentsPage({ searchParams }: Props) {
 
   const accountOptions = toPaymentAccountOptions(paymentAccounts);
 
+  const outstandingTenancyIds = new Set(
+    monthSummary.rows
+      .filter((row) => row.outstanding > 0 && row.status !== "waived")
+      .map((row) => row.tenancyId)
+  );
+
   const tenancyOptions: TenancyOption[] = (tenancyRows ?? [])
-    .filter((row) => isActiveTenancyStatus(row.status))
+    .filter(
+      (row) =>
+        isActiveTenancyStatus(row.status) ||
+        outstandingTenancyIds.has(row.id as string)
+    )
     .map((row) => {
       const tenantRow = unwrapOne(row.tenants);
       const flatRow = unwrapOne(row.flats);
@@ -112,17 +122,23 @@ export default async function PaymentsPage({ searchParams }: Props) {
         upiQrUrl: flatRow?.upi_qr_url,
         buildingWing: buildingWingFromFlatNumber(flatRow?.flat_number),
       });
+      const vacated = !isActiveTenancyStatus(row.status);
+      const flatNumber = flatRow?.flat_number?.trim() || "—";
+      const tenantName = tenantRow?.full_name?.trim() || "Tenant";
       return {
         id: row.id,
         flatId: flatRow?.id ?? "",
-        flatNumber: flatRow?.flat_number?.trim() || "—",
-        tenantName: tenantRow?.full_name?.trim() || "Tenant",
+        flatNumber,
+        tenantName,
         monthlyRent: Number.isFinite(rent) ? rent : null,
-        label: `Flat ${flatRow?.flat_number ?? "?"} — ${tenantRow?.full_name ?? "Tenant"}`,
+        label: `Flat ${flatNumber} — ${tenantName}${vacated ? " (vacated)" : ""}`,
         suggestedReceiverAccountId:
           flatRow?.payment_account_id ?? suggested?.id ?? null,
       };
     });
+
+  const recordTenancyId =
+    typeof params.record_tenancy === "string" ? params.record_tenancy : undefined;
 
   const filterMonth = month ?? monthSummary.billingMonthKey;
 
@@ -135,9 +151,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
             Rent & Payments
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Record collections against active tenancies, track status, and
-            issue unique receipts. Confirmed/reserved units are excluded until
-            move-in.
+            Record collections against active tenancies (and vacated tenants
+            with final-month dues). Issue unique receipts automatically.
           </p>
         </div>
         <a
@@ -214,6 +229,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
         <RecordPaymentForm
           tenancies={tenancyOptions}
           accounts={accountOptions}
+          defaultTenancyId={recordTenancyId}
+          defaultBillingMonth={filterMonth}
         />
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -222,7 +239,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
               Month ledger — {monthSummary.billingMonthLabel}
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Per active tenancy for the selected month.
+              Active and vacated tenancies billed for the selected month.
             </p>
           </div>
           {monthSummary.rows.length === 0 ? (
@@ -267,6 +284,14 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     >
                       {paymentStatusLabel(row.status)}
                     </span>
+                    {row.outstanding > 0 && row.status !== "waived" ? (
+                      <Link
+                        href={`/admin/payments?month=${filterMonth}&record_tenancy=${row.tenancyId}#record-payment`}
+                        className="text-sm font-semibold text-emerald-700"
+                      >
+                        Record payment
+                      </Link>
+                    ) : null}
                     {row.lastReceiptId ? (
                       <Link
                         href={`/admin/receipts/${row.lastReceiptId}`}

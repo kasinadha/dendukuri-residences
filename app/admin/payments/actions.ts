@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
+import { getTenantMonthDue } from "@/lib/reminders";
 import {
   appendDuesBreakdownToNotes,
   applyAdditionalPaymentToBreakdown,
@@ -143,11 +144,14 @@ export async function recordRentPayment(
   const { tenancy } = tenancyResult;
 
   if (!isActiveTenancyStatus(tenancy.status)) {
-    return {
-      ok: false,
-      error:
-        "Only ACTIVE tenancies can have rent recorded. Confirmed/reserved flats (e.g. D201 before move-in) are excluded.",
-    };
+    const monthDue = await getTenantMonthDue(supabase, tenancyId, billingMonth);
+    if (!monthDue || monthDue.outstanding <= 0) {
+      return {
+        ok: false,
+        error:
+          "This tenancy is closed and has no outstanding dues for the selected month.",
+      };
+    }
   }
 
   const status = waived
