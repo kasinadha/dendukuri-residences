@@ -6,6 +6,63 @@ export type DuesBreakdownLine = {
   outstanding: number;
 };
 
+/** Waterfall order when a lump-sum payment covers multiple dues. */
+export const DUES_LINE_ALLOCATION_ORDER = [
+  "rent",
+  "maintenance",
+  "parking",
+  "washer",
+  "other",
+  "electricity",
+] as const;
+
+function cloneLines(lines: DuesBreakdownLine[]): DuesBreakdownLine[] {
+  return lines.map((line) => ({ ...line }));
+}
+
+/** Allocate cumulative payments across due lines (mutates `lines`). */
+export function allocatePaymentsAcrossLines(
+  lines: DuesBreakdownLine[],
+  totalPaid: number
+): void {
+  let remaining = Math.max(0, totalPaid);
+  for (const key of DUES_LINE_ALLOCATION_ORDER) {
+    const line = lines.find((item) => item.key === key);
+    if (!line) continue;
+    const applied = Math.min(line.due, remaining);
+    line.paid = applied;
+    line.outstanding = Math.max(0, line.due - applied);
+    remaining -= applied;
+  }
+}
+
+export function computeBreakdownTotals(
+  lines: DuesBreakdownLine[]
+): Pick<DuesBreakdown, "totalDue" | "totalPaid" | "totalOutstanding"> {
+  const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
+  const totalPaid = lines.reduce((sum, line) => sum + line.paid, 0);
+  const totalOutstanding = lines.reduce((sum, line) => sum + line.outstanding, 0);
+  return { totalDue, totalPaid, totalOutstanding };
+}
+
+/** Preview or persist how an additional payment applies on top of prior allocations. */
+export function applyAdditionalPaymentToBreakdown(
+  breakdown: DuesBreakdown,
+  additionalPaid: number
+): DuesBreakdown {
+  if (!Number.isFinite(additionalPaid) || additionalPaid <= 0) {
+    return breakdown;
+  }
+  const lines = cloneLines(breakdown.lines);
+  const priorPaid = lines.reduce((sum, line) => sum + line.paid, 0);
+  allocatePaymentsAcrossLines(lines, priorPaid + additionalPaid);
+  return {
+    billingMonthKey: breakdown.billingMonthKey,
+    lines,
+    ...computeBreakdownTotals(lines),
+  };
+}
+
 export type DuesBreakdown = {
   billingMonthKey: string;
   lines: DuesBreakdownLine[];
