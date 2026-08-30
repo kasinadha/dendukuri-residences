@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isActiveTenancyStatus } from "@/lib/occupancy";
+import {
+  describeFlatBillingOccupancy,
+  tenancyOverlapsBillingMonth,
+  type ElectricityBillingOccupancyKind,
+} from "@/lib/electricity-occupancy";
 import {
   calculateCommonAreaUnits,
   calculateCommonSharePerFlat,
@@ -39,6 +43,8 @@ export type OccupiedFlatForBilling = {
   buildingWing: "C" | "D" | null;
   previousReading: number;
   sanctionedKw: number;
+  occupancyKind?: ElectricityBillingOccupancyKind;
+  occupancyNote?: string;
 };
 
 export type ElectricityBillingRunSummary = {
@@ -93,7 +99,18 @@ export async function listFlatsForSelect(
 }
 
 export async function listOccupiedFlatsForBilling(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  billingMonthKey?: string
+): Promise<OccupiedFlatForBilling[]> {
+  return listFlatsForElectricityBilling(
+    supabase,
+    billingMonthKey?.trim() || currentMonthKey()
+  );
+}
+
+export async function listFlatsForElectricityBilling(
+  supabase: SupabaseClient,
+  billingMonthKey: string
 ): Promise<OccupiedFlatForBilling[]> {
   const { data } = await supabase
     .from("tenancies")
@@ -101,29 +118,66 @@ export async function listOccupiedFlatsForBilling(
       `
       id,
       status,
+      start_date,
+      end_date,
       flats ( id, flat_number ),
       tenants ( full_name )
     `
     );
 
-  const occupied = (data ?? []).filter((row) =>
-    isActiveTenancyStatus(row.status)
-  );
+  type TenancyRow = {
+    id: string;
+    status: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    flats: { id: string; flat_number: string } | { id: string; flat_number: string }[] | null;
+    tenants: { full_name: string } | { full_name: string }[] | null;
+  };
 
-  const results: OccupiedFlatForBilling[] = [];
-  for (const row of occupied) {
+  const byFlat = new Map<
+    string,
+    { flatNumber: string; tenancies: TenancyRow[] }
+  >();
+
+  for (const row of (data ?? []) as TenancyRow[]) {
+    if (!tenancyOverlapsBillingMonth(row, billingMonthKey)) continue;
     const flat = unwrapOne(row.flats);
-    const tenant = unwrapOne(row.tenants);
     if (!flat?.id) continue;
 
-    const last = await getLastReadingForFlat(supabase, flat.id);
-    results.push({
-      flatId: flat.id,
+    const existing = byFlat.get(flat.id);
+    if (existing) {
+      existing.tenancies.push(row);
+      continue;
+    }
+
+    byFlat.set(flat.id, {
       flatNumber: flat.flat_number?.trim() || "—",
-      tenantName: tenant?.full_name?.trim() || "Tenant",
-      buildingWing: buildingWingFromFlatNumber(flat.flat_number),
+      tenancies: [row],
+    });
+  }
+
+  const results: OccupiedFlatForBilling[] = [];
+  for (const [flatId, { flatNumber, tenancies }] of byFlat) {
+    const occupancy = describeFlatBillingOccupancy(
+      tenancies.map((row) => ({
+        start_date: row.start_date,
+        end_date: row.end_date,
+        status: row.status,
+        tenantName: unwrapOne(row.tenants)?.full_name?.trim() || "Tenant",
+      })),
+      billingMonthKey
+    );
+
+    const last = await getLastReadingForFlat(supabase, flatId);
+    results.push({
+      flatId,
+      flatNumber,
+      tenantName: occupancy.tenantName,
+      buildingWing: buildingWingFromFlatNumber(flatNumber),
       previousReading: last?.currentReading ?? 0,
       sanctionedKw: 2,
+      occupancyKind: occupancy.occupancyKind,
+      occupancyNote: occupancy.occupancyNote || undefined,
     });
   }
 
@@ -148,6 +202,23 @@ export async function getLastReadingForFlat(
     currentReading: num(data.current_reading),
     readingDate: data.reading_date,
   };
+}
+
+export async function getLastReadingsByFlatId(
+  supabase: SupabaseClient
+): Promise<Record<string, number>> {
+  const { data } = await supabase
+    .from("electricity_readings")
+    .select("flat_id, current_reading, reading_date")
+    .order("reading_date", { ascending: false });
+
+  const readings: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const flatId = row.flat_id as string;
+    if (!flatId || flatId in readings) continue;
+    readings[flatId] = num(row.current_reading);
+  }
+  return readings;
 }
 
 export async function listElectricityReadings(

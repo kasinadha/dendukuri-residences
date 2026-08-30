@@ -33,9 +33,11 @@ export default async function ElectricityPage() {
         </h2>
         <p className="mt-2 max-w-3xl text-slate-500">
           Enter the <strong>Building C</strong> or <strong>Building D</strong> main
-          meter readings separately, plus each flat&apos;s cumulative meter. Common
-          area for that wing = building usage − sum of flat usage in the same wing,
-          shared only among occupied flats in that wing.
+          meter readings separately, plus each flat&apos;s cumulative meter. Flats
+          are picked for the billing month you select (including mid-month move-ins
+          and vacated units). Common area for that wing = building usage − sum of
+          flat usage in the same wing, shared only among included flats in that
+          wing.
         </p>
       </div>
 

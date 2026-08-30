@@ -251,7 +251,7 @@ export async function endTenancy(
   input: {
     tenancyId: string;
     endDate?: string | null;
-    status?: "ended" | "transferred";
+    status?: "ended" | "vacated" | "transferred";
   }
 ): Promise<EndTenancyResult> {
   const tenancyId = input.tenancyId.trim();
