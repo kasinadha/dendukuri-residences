@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
+import { appendDuesBreakdownToNotes } from "@/lib/dues-breakdown";
 import {
   approvePaymentSubmission,
   rejectPaymentSubmission,
@@ -20,6 +21,7 @@ import {
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
 import { voidPaymentRecord } from "@/lib/void-payment";
+import { getTenancyDuesBreakdown } from "@/lib/public-pay-dues";
 
 export type RecordPaymentResult =
   | {
@@ -73,6 +75,26 @@ export async function rejectPaymentSubmissionAction(formData: FormData) {
     revalidatePath("/tenant");
   }
   return result;
+}
+
+export async function fetchTenancyDuesBreakdownAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tenancyId = asString(formData, "tenancy_id");
+  const flatId = asString(formData, "flat_id");
+  const billingMonth = asString(formData, "billing_month");
+
+  if (!tenancyId || !flatId) {
+    return { ok: false as const, error: "Select a tenancy." };
+  }
+  if (!/^\d{4}-\d{2}$/.test(billingMonth)) {
+    return { ok: false as const, error: "Billing month is invalid." };
+  }
+
+  return getTenancyDuesBreakdown(supabase, {
+    tenancyId,
+    flatId,
+    billingMonthKey: billingMonth,
+  });
 }
 
 export async function recordRentPayment(
@@ -130,6 +152,12 @@ export async function recordRentPayment(
     : computePaymentStatus(amountDue, amountPaid);
 
   const flat = unwrapFlat(tenancy.flats);
+  const breakdownResult = await getTenancyDuesBreakdown(supabase, {
+    tenancyId,
+    flatId: flat?.id ?? "",
+    billingMonthKey: billingMonth,
+  });
+
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId: explicitReceiverAccountId,
     upiId: flat?.upi_id,
@@ -147,7 +175,10 @@ export async function recordRentPayment(
     payment_type: "rent",
     transaction_reference: transactionReference || null,
     status,
-    notes: encodeBillingMonthNote(billingMonth, notes || undefined),
+    notes: appendDuesBreakdownToNotes(
+      encodeBillingMonthNote(billingMonth, notes || undefined),
+      breakdownResult.ok ? breakdownResult.breakdown : null
+    ),
   };
 
   if (receiverAccountId) {

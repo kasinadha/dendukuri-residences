@@ -1,8 +1,13 @@
 "use client";
 
-import { FormEvent, useMemo, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { tenantSubmitRentPayment } from "@/app/tenant/actions";
+import {
+  fetchTenantDuesBreakdownAction,
+  tenantSubmitRentPayment,
+} from "@/app/tenant/actions";
+import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
+import type { DuesBreakdown } from "@/lib/dues-breakdown";
 import {
   buildUpiPayLink,
   buildUpiQrImageUrl,
@@ -35,6 +40,8 @@ export default function TenantRentPaymentForm({
     monthlyRent != null ? String(monthlyRent) : ""
   );
   const [billingMonth, setBillingMonth] = useState(defaultBillingMonth);
+  const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
+  const [breakdownError, setBreakdownError] = useState("");
 
   const amountNum = Number(amount);
   const upiLink = useMemo(() => {
@@ -50,12 +57,37 @@ export default function TenantRentPaymentForm({
   const generatedQrUrl = upiLink ? buildUpiQrImageUrl(upiLink) : null;
   const qrUrl = upiQrUrl?.trim() || generatedQrUrl;
 
+  useEffect(() => {
+    const formData = new FormData();
+    formData.set("billing_month", billingMonth);
+    let cancelled = false;
+    void fetchTenantDuesBreakdownAction(formData).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setBreakdown(null);
+        setBreakdownError(result.error);
+        return;
+      }
+      setBreakdownError("");
+      setBreakdown(result.breakdown);
+      setAmount(
+        String(result.breakdown.totalOutstanding || result.breakdown.totalDue)
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [billingMonth]);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setSuccess("");
     const formData = new FormData(event.currentTarget);
     formData.set("tenancy_id", tenancyId);
+    if (breakdown) {
+      formData.set("dues_breakdown_json", JSON.stringify(breakdown));
+    }
     startTransition(async () => {
       try {
         const result = await tenantSubmitRentPayment(formData);
@@ -228,6 +260,19 @@ export default function TenantRentPaymentForm({
             />
           </label>
         </div>
+
+        {breakdown ? (
+          <div className="mt-6">
+            <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
+            <div className="mt-3">
+              <DuesBreakdownTable breakdown={breakdown} />
+            </div>
+          </div>
+        ) : breakdownError ? (
+          <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {breakdownError}
+          </p>
+        ) : null}
 
         {error ? (
           <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">

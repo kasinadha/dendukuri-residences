@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 type FlatPaymentFields = {
+  id?: string;
   flat_number: string | null;
   upi_id: string | null;
   upi_qr_url: string | null;
@@ -33,7 +34,7 @@ export async function fetchTenancyForPayment(
       id,
       status,
       monthly_rent,
-      flats ( flat_number, upi_id, upi_qr_url, payment_account_id )
+      flats ( id, flat_number, upi_id, upi_qr_url, payment_account_id )
     `
     )
     .eq("id", tenancyId)
@@ -51,7 +52,7 @@ export async function fetchTenancyForPayment(
         id,
         status,
         monthly_rent,
-        flats ( flat_number, upi_id, upi_qr_url )
+        flats ( id, flat_number, upi_id, upi_qr_url )
       `
       )
       .eq("id", tenancyId)

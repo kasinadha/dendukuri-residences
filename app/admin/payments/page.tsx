@@ -73,7 +73,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
       status,
       monthly_rent,
       tenants ( full_name ),
-      flats ( flat_number, upi_id, upi_qr_url, payment_account_id )
+      flats ( id, flat_number, upi_id, upi_qr_url, payment_account_id )
     `
     )
     .order("created_at", { ascending: false });
@@ -114,6 +114,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
       });
       return {
         id: row.id,
+        flatId: flatRow?.id ?? "",
         flatNumber: flatRow?.flat_number?.trim() || "—",
         tenantName: tenantRow?.full_name?.trim() || "Tenant",
         monthlyRent: Number.isFinite(rent) ? rent : null,

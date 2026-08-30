@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildingWingFromFlatNumber } from "@/lib/building-wing";
+import {
+  appendDuesBreakdownToNotes,
+  parseDuesBreakdownFromNotes,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
 import { mapProofPathsToSignedUrls } from "@/lib/payment-proofs";
 import { resolveReceiverAccountId } from "@/lib/payment-accounts";
 import { insertPaymentRecord } from "@/lib/payment-record";
@@ -211,6 +216,7 @@ export async function createPaymentSubmission(
     utr: string;
     upiId?: string | null;
     notes?: string | null;
+    duesBreakdown?: DuesBreakdown | null;
     proofPath?: string | null;
     submittedBy: string;
   }
@@ -253,6 +259,11 @@ export async function createPaymentSubmission(
     flatId = tenancy?.flat_id ?? null;
   }
 
+  const submissionNotes = appendDuesBreakdownToNotes(
+    input.notes?.trim() || null,
+    input.duesBreakdown ?? null
+  );
+
   const payload: Record<string, unknown> = {
     tenancy_id: input.tenancyId,
     billing_month: input.billingMonth,
@@ -260,7 +271,7 @@ export async function createPaymentSubmission(
     payment_date: input.paymentDate,
     utr: input.utr.trim(),
     upi_id: input.upiId?.trim() || null,
-    notes: input.notes?.trim() || null,
+    notes: submissionNotes,
     proof_path: input.proofPath?.trim() || null,
     status: "pending",
     submitted_by: input.submittedBy,
@@ -288,7 +299,7 @@ export async function createPaymentSubmission(
           payment_date: input.paymentDate,
           utr: input.utr.trim(),
           upi_id: input.upiId?.trim() || null,
-          notes: input.notes?.trim() || null,
+          notes: submissionNotes,
           proof_path: input.proofPath?.trim() || null,
           status: "pending",
           submitted_by: input.submittedBy,
@@ -562,6 +573,27 @@ export async function approvePaymentSubmission(
     buildingWing: buildingWingFromFlatNumber(flatNumber),
   });
 
+  const duesBreakdown = parseDuesBreakdownFromNotes(submission.notes);
+  const billingNote = encodeBillingMonthNote(
+    billingMonth,
+    [
+      `Approved from ${purposeLabel(purpose)} UTR submission`,
+      submission.payer_name
+        ? `Payer: ${submission.payer_name}${
+            submission.payer_phone ? ` (${submission.payer_phone})` : ""
+          }`
+        : null,
+      submission.notes && !duesBreakdown
+        ? `Notes: ${submission.notes}`
+        : submission.notes && duesBreakdown
+          ? `Notes: ${submission.notes.replace(/^dues_breakdown:[^\n]+\n?/, "").trim()}`
+          : null,
+      input.adminNotes ? `Admin notes: ${input.adminNotes}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n") || undefined
+  );
+
   const paymentPayload: Record<string, unknown> = {
     tenancy_id: tenancyId,
     payment_date: submission.payment_date,
@@ -571,21 +603,7 @@ export async function approvePaymentSubmission(
     payment_type: purpose,
     transaction_reference: submission.utr,
     status: "paid",
-    notes: encodeBillingMonthNote(
-      billingMonth,
-      [
-        `Approved from ${purposeLabel(purpose)} UTR submission`,
-        submission.payer_name
-          ? `Payer: ${submission.payer_name}${
-              submission.payer_phone ? ` (${submission.payer_phone})` : ""
-            }`
-          : null,
-        submission.notes ? `Notes: ${submission.notes}` : null,
-        input.adminNotes ? `Admin notes: ${input.adminNotes}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n") || undefined
-    ),
+    notes: appendDuesBreakdownToNotes(billingNote, duesBreakdown),
   };
 
   if (receiverAccountId) {

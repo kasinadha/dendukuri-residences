@@ -1,5 +1,8 @@
 import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DuesBreakdown } from "@/lib/dues-breakdown";
+import { parseDuesBreakdownFromNotes } from "@/lib/dues-breakdown";
+import { resolveReceiptDuesBreakdown } from "@/lib/public-pay-dues";
 import { PROPERTY_NAME } from "@/lib/property";
 
 export const BILLING_MONTH_NOTE_PREFIX = "billing_month:";
@@ -42,6 +45,7 @@ export type ReceiptViewModel = {
   transactionReference: string;
   paymentId: string;
   createdAt: string;
+  duesBreakdown: DuesBreakdown | null;
 };
 
 /** YYYY-MM → "August 2026" (en-IN). */
@@ -236,6 +240,7 @@ export function toReceiptViewModel(
   const amountDue =
     amountDueRaw != null && Number.isFinite(amountDueRaw) ? amountDueRaw : null;
   const paid = Number.isFinite(amountPaid) ? amountPaid : 0;
+  const duesBreakdown = parseDuesBreakdownFromNotes(payment.notes);
 
   return {
     receiptId: receipt.id,
@@ -254,7 +259,29 @@ export function toReceiptViewModel(
     transactionReference: payment.transaction_reference?.trim() || "—",
     paymentId: payment.id,
     createdAt: receipt.created_at,
+    duesBreakdown,
   };
+}
+
+async function enrichReceiptViewModel(
+  supabase: SupabaseClient,
+  receipt: ReceiptRecord,
+  payment: PaymentJoinRow
+): Promise<ReceiptViewModel> {
+  const view = toReceiptViewModel(receipt, payment);
+  if (view.duesBreakdown) return view;
+
+  const tenancy = unwrapOne(payment.tenancies);
+  const flat = unwrapOne(tenancy?.flats ?? null);
+
+  const computed = await resolveReceiptDuesBreakdown(supabase, {
+    notes: payment.notes,
+    tenancyId: payment.tenancy_id ?? tenancy?.id ?? null,
+    flatId: flat?.id ?? null,
+    billingMonthKey: view.billingMonthKey,
+  });
+
+  return { ...view, duesBreakdown: computed };
 }
 
 export async function fetchReceiptViewById(
@@ -297,7 +324,8 @@ export async function fetchReceiptViewById(
 
   if (paymentError || !payment) return null;
 
-  return toReceiptViewModel(
+  return enrichReceiptViewModel(
+    supabase,
     receipt as ReceiptRecord,
     payment as unknown as PaymentJoinRow
   );
@@ -349,11 +377,15 @@ export async function listReceiptViews(
     payments.map((p) => [p.id, p as unknown as PaymentJoinRow])
   );
 
-  return receipts
-    .map((receipt) => {
+  return Promise.all(
+    receipts.map(async (receipt) => {
       const payment = byId.get(receipt.payment_id);
       if (!payment) return null;
-      return toReceiptViewModel(receipt as ReceiptRecord, payment);
+      return enrichReceiptViewModel(
+        supabase,
+        receipt as ReceiptRecord,
+        payment
+      );
     })
-    .filter((row): row is ReceiptViewModel => row !== null);
+  ).then((rows) => rows.filter((row): row is ReceiptViewModel => row !== null));
 }

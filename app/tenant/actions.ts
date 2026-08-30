@@ -10,6 +10,10 @@ import {
   validatePaymentProofFile,
 } from "@/lib/payment-proofs";
 import { createPaymentSubmission } from "@/lib/payment-submissions";
+import {
+  getTenancyDuesBreakdown,
+  parseDuesBreakdownJson,
+} from "@/lib/public-pay-dues";
 import { resolveRentUpiDisplay } from "@/lib/rent-upi";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
@@ -21,6 +25,25 @@ function asString(formData: FormData, key: string): string {
 function asFile(formData: FormData, key: string): File | null {
   const value = formData.get(key);
   return value instanceof File ? value : null;
+}
+
+export async function fetchTenantDuesBreakdownAction(formData: FormData) {
+  const { supabase, user } = await requireTenant();
+  const ctx = await getTenantPortalContext(supabase, user.id);
+  if (!ctx?.tenancyId || !ctx.flatId) {
+    return { ok: false as const, error: "No active tenancy on your account." };
+  }
+
+  const billingMonth = asString(formData, "billing_month");
+  if (!/^\d{4}-\d{2}$/.test(billingMonth)) {
+    return { ok: false as const, error: "Billing month is invalid." };
+  }
+
+  return getTenancyDuesBreakdown(supabase, {
+    tenancyId: ctx.tenancyId,
+    flatId: ctx.flatId,
+    billingMonthKey: billingMonth,
+  });
 }
 
 export async function tenantSubmitRentPayment(formData: FormData) {
@@ -54,15 +77,29 @@ export async function tenantSubmitRentPayment(formData: FormData) {
     : null;
   const { upiId } = resolveRentUpiDisplay(flatUpi);
   const amount = Number(asString(formData, "amount"));
+  const billingMonth = asString(formData, "billing_month");
+
+  let duesBreakdown = parseDuesBreakdownJson(
+    asString(formData, "dues_breakdown_json")
+  );
+  if (!duesBreakdown && ctx.flatId) {
+    const breakdownResult = await getTenancyDuesBreakdown(supabase, {
+      tenancyId,
+      flatId: ctx.flatId,
+      billingMonthKey: billingMonth,
+    });
+    if (breakdownResult.ok) duesBreakdown = breakdownResult.breakdown;
+  }
 
   const result = await createPaymentSubmission(supabase, {
     tenancyId,
-    billingMonth: asString(formData, "billing_month"),
+    billingMonth,
     amount,
     paymentDate: asString(formData, "payment_date"),
     utr: asString(formData, "utr"),
     upiId,
     notes: asString(formData, "notes") || null,
+    duesBreakdown,
     proofPath,
     submittedBy: user.id,
   });

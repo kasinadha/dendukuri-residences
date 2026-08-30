@@ -1,14 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { FormEvent, useState, useTransition } from "react";
-import { recordRentPayment } from "@/app/admin/payments/actions";
+import { FormEvent, useEffect, useState, useTransition } from "react";
+import {
+  fetchTenancyDuesBreakdownAction,
+  recordRentPayment,
+} from "@/app/admin/payments/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
+import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import { computePaymentStatus } from "@/lib/payment-status";
+import type { DuesBreakdown } from "@/lib/dues-breakdown";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
 
 export type TenancyOption = {
   id: string;
+  flatId: string;
   label: string;
   flatNumber: string;
   tenantName: string;
@@ -65,6 +71,9 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
   const [amountPaid, setAmountPaid] = useState(
     selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
   );
+  const [billingMonth, setBillingMonth] = useState(currentYearMonth());
+  const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
+  const [breakdownError, setBreakdownError] = useState("");
 
   const dueNum = Number(amountDue);
   const paidNum = Number(amountPaid);
@@ -72,6 +81,30 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
     Number.isFinite(dueNum) && Number.isFinite(paidNum)
       ? computePaymentStatus(dueNum, paidNum)
       : null;
+
+  useEffect(() => {
+    if (!tenancyId || !selected?.flatId || !billingMonth) return;
+    const formData = new FormData();
+    formData.set("tenancy_id", tenancyId);
+    formData.set("flat_id", selected.flatId);
+    formData.set("billing_month", billingMonth);
+    let cancelled = false;
+    void fetchTenancyDuesBreakdownAction(formData).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setBreakdown(null);
+        setBreakdownError(result.error);
+        return;
+      }
+      setBreakdownError("");
+      setBreakdown(result.breakdown);
+      setAmountDue(String(result.breakdown.totalOutstanding || result.breakdown.totalDue));
+      setAmountPaid(String(result.breakdown.totalOutstanding || result.breakdown.totalDue));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenancyId, selected?.flatId, billingMonth]);
 
   function onTenancyChange(id: string) {
     setTenancyId(id);
@@ -169,7 +202,8 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
             type="month"
             name="billing_month"
             required
-            defaultValue={currentYearMonth()}
+            value={billingMonth}
+            onChange={(e) => setBillingMonth(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
           />
         </label>
@@ -280,6 +314,19 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
           />
         </label>
       </div>
+
+      {breakdown ? (
+        <div className="mt-6">
+          <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
+          <div className="mt-3">
+            <DuesBreakdownTable breakdown={breakdown} />
+          </div>
+        </div>
+      ) : breakdownError ? (
+        <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {breakdownError}
+        </p>
+      ) : null}
 
       {error ? (
         <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">

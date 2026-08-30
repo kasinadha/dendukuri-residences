@@ -115,11 +115,7 @@ export default function TenantVacateForm() {
         disabled={pending}
         className="mt-6 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
       >
-        {pending
-          ? "Submitting…"
-          : kind === "transfer"
-            ? "Submit transfer request"
-            : "Submit vacate request"}
+        {pending ? "Submitting…" : "Submit request"}
       </button>
     </form>
   );
