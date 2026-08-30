@@ -4,7 +4,9 @@ import {
   type DuesBreakdownLine,
 } from "@/lib/dues-breakdown";
 import { roundElectricityDue } from "@/lib/electricity-billing";
+import { tenancyOverlapsBillingMonth } from "@/lib/electricity-occupancy";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
+import { tenancyOwesMonthlyRent } from "@/lib/rent-billing-month";
 import {
   applyOverdueIfNeeded,
   computePaymentStatus,
@@ -86,6 +88,8 @@ const TENANCY_SELECT_FULL = `
   id,
   status,
   monthly_rent,
+  start_date,
+  end_date,
   maintenance_charge,
   car_parking_charge,
   washing_machine_charge,
@@ -99,6 +103,8 @@ const TENANCY_SELECT_FALLBACK = `
   id,
   status,
   monthly_rent,
+  start_date,
+  end_date,
   tenants ( full_name ),
   flats ( id, flat_number, maintenance_amount )
 `;
@@ -219,7 +225,7 @@ function buildMonthlyDuesLines(input: {
 
 /**
  * Monthly dues for active tenancies: rent + monthly charges + electricity.
- * Payments counted: rent + maintenance for the billing month (advance excluded).
+ * Rent/charges start the month after move-in; electricity follows billing occupancy.
  */
 export async function getMonthlyDuesSummary(
   supabase: SupabaseClient,
@@ -234,6 +240,16 @@ export async function getMonthlyDuesSummary(
   ]);
   const active = tenancyRows.filter((row) =>
     isActiveTenancyStatus(row.status)
+  );
+  const billable = active.filter((row) =>
+    tenancyOverlapsBillingMonth(
+      {
+        start_date: (row as { start_date?: string | null }).start_date ?? null,
+        end_date: (row as { end_date?: string | null }).end_date ?? null,
+        status: row.status,
+      },
+      monthKey
+    )
   );
 
   const { data: paymentRows } = await supabase
@@ -310,9 +326,16 @@ export async function getMonthlyDuesSummary(
     paidByTenancy.set(tenancyId, prev);
   }
 
-  const rows: MonthlyDuesLedgerRow[] = active.map((row) => {
+  const rows: MonthlyDuesLedgerRow[] = billable
+    .map((row) => {
     const tenant = unwrapOne(row.tenants);
     const flat = unwrapOne(row.flats);
+    const tenancyDates = {
+      start_date: (row as { start_date?: string | null }).start_date ?? null,
+      end_date: (row as { end_date?: string | null }).end_date ?? null,
+      status: row.status,
+    };
+    const owesRent = tenancyOwesMonthlyRent(tenancyDates, monthKey);
     const charges = buildTenantMonthlyCharges({
       maintenanceCharge: numOrNull(
         (row as { maintenance_charge?: unknown }).maintenance_charge
@@ -332,15 +355,19 @@ export async function getMonthlyDuesSummary(
       flatMaintenanceFallback: numOrNull(flat?.maintenance_amount),
     });
 
-    const rentDue = num(row.monthly_rent);
-    const chargesDue = charges.totalMonthlyCharges;
+    const rentDue = owesRent ? num(row.monthly_rent) : 0;
+    const maintenanceCharge = owesRent ? charges.maintenanceCharge : 0;
+    const carParkingCharge = owesRent ? charges.carParkingCharge : 0;
+    const washingMachineCharge = owesRent ? charges.washingMachineCharge : 0;
+    const otherMonthlyCharge = owesRent ? charges.otherMonthlyCharge : 0;
+    const chargesDue = owesRent ? charges.totalMonthlyCharges : 0;
     const electricityCharge = electricityByFlatId.get(flat?.id ?? "") ?? 0;
     const lines = buildMonthlyDuesLines({
       rentDue,
-      maintenanceCharge: charges.maintenanceCharge,
-      carParkingCharge: charges.carParkingCharge,
-      washingMachineCharge: charges.washingMachineCharge,
-      otherMonthlyCharge: charges.otherMonthlyCharge,
+      maintenanceCharge,
+      carParkingCharge,
+      washingMachineCharge,
+      otherMonthlyCharge,
       otherChargesNotes: charges.otherChargesNotes,
       electricityCharge,
     });
@@ -364,10 +391,10 @@ export async function getMonthlyDuesSummary(
       tenantName: tenant?.full_name?.trim() || "—",
       billingMonthKey: monthKey,
       rentDue,
-      maintenanceCharge: charges.maintenanceCharge,
-      carParkingCharge: charges.carParkingCharge,
-      washingMachineCharge: charges.washingMachineCharge,
-      otherMonthlyCharge: charges.otherMonthlyCharge,
+      maintenanceCharge,
+      carParkingCharge,
+      washingMachineCharge,
+      otherMonthlyCharge,
       otherChargesNotes: charges.otherChargesNotes,
       chargesDue,
       electricityCharge,
@@ -382,7 +409,8 @@ export async function getMonthlyDuesSummary(
       lastReceiptNumber: paidInfo?.lastReceiptNumber ?? null,
       lastPaymentDate: paidInfo?.lastPaymentDate ?? null,
     };
-  });
+  })
+    .filter((row) => row.totalDue > 0 || row.amountPaid > 0);
 
   rows.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber));
 
