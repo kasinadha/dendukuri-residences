@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isActiveTenancyStatus, isEndedTenancyStatus } from "@/lib/occupancy";
+import { tenantPhoneKey } from "@/lib/tenant-duplicates";
 import {
   buildTenantMonthlyCharges,
   type TenantMonthlyCharges,
@@ -189,6 +190,156 @@ export async function updateTenantTenancyTerms(
     }
     return { ok: false, error: tenancyError.message };
   }
+
+  return { ok: true };
+}
+
+async function cancelDuplicateFlatTenancies(
+  supabase: SupabaseClient,
+  tenantId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: tenancies, error } = await supabase
+    .from("tenancies")
+    .select("id, flat_id, status")
+    .eq("tenant_id", tenantId);
+
+  if (error) return { ok: false, error: error.message };
+
+  const byFlat = new Map<
+    string,
+    { activeId: string | null; endedIds: string[] }
+  >();
+
+  for (const row of tenancies ?? []) {
+    const flatId = row.flat_id as string;
+    if (!flatId) continue;
+    const entry = byFlat.get(flatId) ?? { activeId: null, endedIds: [] };
+    if (isActiveTenancyStatus(row.status as string | null)) {
+      entry.activeId = row.id as string;
+    } else if (isEndedTenancyStatus(row.status as string | null)) {
+      entry.endedIds.push(row.id as string);
+    }
+    byFlat.set(flatId, entry);
+  }
+
+  for (const { activeId, endedIds } of byFlat.values()) {
+    if (!activeId || endedIds.length === 0) continue;
+
+    for (const endedId of endedIds) {
+      const { error: paymentMoveError } = await supabase
+        .from("payments")
+        .update({ tenancy_id: activeId })
+        .eq("tenancy_id", endedId);
+
+      if (paymentMoveError) {
+        return { ok: false, error: paymentMoveError.message };
+      }
+
+      const { error: cancelError } = await supabase
+        .from("tenancies")
+        .update({ status: "cancelled" })
+        .eq("id", endedId);
+
+      if (cancelError) return { ok: false, error: cancelError.message };
+    }
+  }
+
+  return { ok: true };
+}
+
+export async function mergeStaleTenantIntoCanonical(
+  supabase: SupabaseClient,
+  input: { staleTenantId: string; canonicalTenantId: string }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const staleTenantId = input.staleTenantId.trim();
+  const canonicalTenantId = input.canonicalTenantId.trim();
+
+  if (!staleTenantId || !canonicalTenantId) {
+    return { ok: false, error: "Select both tenant records to merge." };
+  }
+  if (staleTenantId === canonicalTenantId) {
+    return { ok: false, error: "Cannot merge a tenant into itself." };
+  }
+
+  const [{ data: stale }, { data: canonical }] = await Promise.all([
+    supabase
+      .from("tenants")
+      .select("id, phone, profile_id, tenancies ( id, status )")
+      .eq("id", staleTenantId)
+      .maybeSingle(),
+    supabase
+      .from("tenants")
+      .select("id, phone, profile_id, tenancies ( id, status )")
+      .eq("id", canonicalTenantId)
+      .maybeSingle(),
+  ]);
+
+  if (!stale || !canonical) {
+    return { ok: false, error: "Tenant record not found." };
+  }
+
+  const staleTenancies = Array.isArray(stale.tenancies)
+    ? stale.tenancies
+    : stale.tenancies
+      ? [stale.tenancies]
+      : [];
+  const canonicalTenancies = Array.isArray(canonical.tenancies)
+    ? canonical.tenancies
+    : canonical.tenancies
+      ? [canonical.tenancies]
+      : [];
+
+  if (staleTenancies.some((row) => isActiveTenancyStatus(row.status))) {
+    return {
+      ok: false,
+      error: "Only a former tenant record can be merged away.",
+    };
+  }
+
+  if (
+    !canonicalTenancies.some((row) => isActiveTenancyStatus(row.status))
+  ) {
+    return {
+      ok: false,
+      error: "Merge into the active tenant record for this flat.",
+    };
+  }
+
+  const stalePhone = tenantPhoneKey(stale.phone as string | null);
+  const canonicalPhone = tenantPhoneKey(canonical.phone as string | null);
+  if (!stalePhone || stalePhone !== canonicalPhone) {
+    return {
+      ok: false,
+      error: "Both records must share the same mobile number.",
+    };
+  }
+
+  const { error: moveError } = await supabase
+    .from("tenancies")
+    .update({ tenant_id: canonicalTenantId })
+    .eq("tenant_id", staleTenantId);
+
+  if (moveError) return { ok: false, error: moveError.message };
+
+  const dedupe = await cancelDuplicateFlatTenancies(supabase, canonicalTenantId);
+  if (!dedupe.ok) return dedupe;
+
+  if (!canonical.profile_id && stale.profile_id) {
+    const { error: profileError } = await supabase
+      .from("tenants")
+      .update({ profile_id: stale.profile_id })
+      .eq("id", canonicalTenantId);
+
+    if (profileError) return { ok: false, error: profileError.message };
+
+    await supabase
+      .from("tenants")
+      .update({ profile_id: null })
+      .eq("id", staleTenantId);
+  }
+
+  const archive = await archiveTenant(supabase, staleTenantId);
+  if (!archive.ok) return archive;
 
   return { ok: true };
 }

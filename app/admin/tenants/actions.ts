@@ -10,6 +10,7 @@ import {
 } from "@/lib/tenant-auth";
 import {
   archiveTenant,
+  mergeStaleTenantIntoCanonical,
   recordTenancyVacateDate,
   updateTenantProfile,
   updateTenantTenancyTerms,
@@ -67,6 +68,22 @@ export async function recordVacateDateAction(formData: FormData) {
   const result = await recordTenancyVacateDate(supabase, {
     tenancyId,
     endDate,
+  });
+  if (result.ok) revalidateOccupancy();
+  return result;
+}
+
+export async function mergeDuplicateTenantAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const staleTenantId = asString(formData, "stale_tenant_id");
+  const canonicalTenantId = asString(formData, "canonical_tenant_id");
+  if (!staleTenantId || !canonicalTenantId) {
+    return { ok: false as const, error: "Missing tenant records to merge." };
+  }
+
+  const result = await mergeStaleTenantIntoCanonical(supabase, {
+    staleTenantId,
+    canonicalTenantId,
   });
   if (result.ok) revalidateOccupancy();
   return result;

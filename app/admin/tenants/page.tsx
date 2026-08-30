@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
+import { buildTenantDuplicateMergeMap } from "@/lib/tenant-duplicates";
 import { listUnpaidRentReminders } from "@/lib/reminders";
 
 export default async function TenantsPage({
@@ -36,6 +37,8 @@ export default async function TenantsPage({
     : nonArchivedTenants;
 
   const listedTenants = showFormer || showArchived ? visibleTenants : activeTenants;
+  const duplicateMergeMap = buildTenantDuplicateMergeMap(tenants);
+  const duplicateCount = duplicateMergeMap.size;
   const vacantFlats = flats
     .filter((f) => !f.isOccupied)
     .map((f) => ({
@@ -131,6 +134,21 @@ export default async function TenantsPage({
           </>
         )}
       </div>
+
+      {duplicateCount > 0 && !showArchived ? (
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-950">
+          <p className="font-semibold">
+            {duplicateCount} duplicate former tenant
+            {duplicateCount === 1 ? "" : "s"} share a mobile with an active
+            tenant.
+          </p>
+          <p className="mt-1">
+            Open <strong>Show former</strong> and use{" "}
+            <strong>Merge into …</strong> on the stale row to combine records
+            (e.g. Priyakshi → Priyanshi on C201).
+          </p>
+        </div>
+      ) : null}
 
       {unpaidDues.rows.length > 0 ? (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
@@ -353,6 +371,7 @@ export default async function TenantsPage({
                         endedTenancyId={tenant.endedTenancyId}
                         vacatedDate={tenant.vacatedDate}
                         lastFlatNumber={tenant.lastFlatNumber}
+                        mergeTarget={duplicateMergeMap.get(tenant.id) ?? null}
                       />
                     )}
                   </div>

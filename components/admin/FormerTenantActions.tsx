@@ -4,6 +4,7 @@ import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   archiveTenantAction,
+  mergeDuplicateTenantAction,
   recordVacateDateAction,
 } from "@/app/admin/tenants/actions";
 import { todayIsoDate } from "@/lib/dates";
@@ -15,6 +16,11 @@ type Props = {
   endedTenancyId: string | null;
   vacatedDate: string | null;
   lastFlatNumber: string | null;
+  mergeTarget?: {
+    canonicalTenantId: string;
+    canonicalName: string;
+    canonicalFlatNumber: string | null;
+  } | null;
 };
 
 export default function FormerTenantActions({
@@ -23,6 +29,7 @@ export default function FormerTenantActions({
   endedTenancyId,
   vacatedDate,
   lastFlatNumber,
+  mergeTarget,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -67,8 +74,33 @@ export default function FormerTenantActions({
     run(archiveTenantAction, formData, "Tenant archived.");
   }
 
+  function onMergeDuplicate() {
+    if (!mergeTarget) return;
+    if (
+      !window.confirm(
+        `Merge ${tenantName} into ${mergeTarget.canonicalName}? The duplicate former record will be removed. History stays on the active tenant.`
+      )
+    ) {
+      return;
+    }
+    const formData = new FormData();
+    formData.set("stale_tenant_id", tenantId);
+    formData.set("canonical_tenant_id", mergeTarget.canonicalTenantId);
+    run(mergeDuplicateTenantAction, formData, "Duplicate tenant merged.");
+  }
+
   return (
     <div className="space-y-2">
+      {mergeTarget ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          Same mobile as active tenant{" "}
+          <span className="font-semibold">{mergeTarget.canonicalName}</span>
+          {mergeTarget.canonicalFlatNumber
+            ? ` (${mergeTarget.canonicalFlatNumber})`
+            : ""}
+          .
+        </p>
+      ) : null}
       {lastFlatNumber ? (
         <p className="text-xs text-slate-600">
           Last flat <span className="font-semibold">{lastFlatNumber}</span>
@@ -83,6 +115,16 @@ export default function FormerTenantActions({
       )}
 
       <div className="flex flex-wrap gap-2">
+        {mergeTarget ? (
+          <button
+            type="button"
+            onClick={onMergeDuplicate}
+            disabled={pending}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+          >
+            Merge into {mergeTarget.canonicalName}
+          </button>
+        ) : null}
         {endedTenancyId ? (
           <button
             type="button"
