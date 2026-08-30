@@ -214,9 +214,8 @@ export default function PublicPayForm() {
                 Amount to pay (₹)
               </span>
               <input
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="decimal"
                 required
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}

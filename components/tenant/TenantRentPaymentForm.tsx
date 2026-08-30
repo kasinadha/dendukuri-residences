@@ -79,7 +79,9 @@ export default function TenantRentPaymentForm({
       setBreakdownError("");
       setBreakdown(result.breakdown);
       setAmount(
-        String(result.breakdown.totalOutstanding || result.breakdown.totalDue)
+        result.breakdown.totalOutstanding > 0
+          ? String(result.breakdown.totalOutstanding)
+          : ""
       );
     });
     return () => {
@@ -208,11 +210,10 @@ export default function TenantRentPaymentForm({
               Amount paid (₹)
             </span>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               name="amount"
               required
-              min="1"
-              step="1"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"

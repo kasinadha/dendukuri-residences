@@ -38,7 +38,7 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
         </Link>
         <div className="flex flex-wrap items-center gap-2">
           <ShareReceiptWhatsAppButton receipt={receipt} viewer={viewer} />
-          <PrintReceiptButton />
+          <PrintReceiptButton receipt={receipt} />
         </div>
       </div>
 

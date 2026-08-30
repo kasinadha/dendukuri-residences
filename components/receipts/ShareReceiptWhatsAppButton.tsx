@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { formatReceiptPdfShareMessage } from "@/lib/receipts";
 import type { ReceiptViewModel } from "@/lib/receipts";
-import { formatReceiptShareMessage } from "@/lib/receipts";
+import {
+  buildReceiptPdfFile,
+  downloadPdfBlob,
+} from "@/lib/receipt-share";
+import { receiptPdfFileName } from "@/lib/receipt-pdf";
 import { toTenantWhatsAppUrl } from "@/lib/whatsapp";
 
 type Props = {
@@ -11,51 +16,68 @@ type Props = {
 };
 
 export default function ShareReceiptWhatsAppButton({ receipt, viewer }: Props) {
-  const [share, setShare] = useState<{
-    href: string;
-    targetsTenant: boolean;
-  } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    const viewUrl = `${window.location.origin}${
-      viewer === "admin"
-        ? `/admin/receipts/${receipt.receiptId}`
-        : `/tenant/receipts/${receipt.receiptId}`
-    }`;
-    const message = formatReceiptShareMessage(receipt, viewUrl);
-    const tenantUrl =
-      viewer === "admin" && receipt.tenantPhone
-        ? toTenantWhatsAppUrl(receipt.tenantPhone, message)
-        : null;
-    const genericUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    setShare({
-      href: tenantUrl ?? genericUrl,
-      targetsTenant: Boolean(tenantUrl),
-    });
-  }, [receipt, viewer]);
+  async function handleShare() {
+    setPending(true);
+    setError("");
 
-  if (viewer === "admin" && !receipt.tenantPhone) {
-    return (
-      <span className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900">
-        Add tenant mobile to share on WhatsApp
-      </span>
-    );
+    try {
+      const file = await buildReceiptPdfFile(receipt);
+      const message = formatReceiptPdfShareMessage(receipt);
+      const shareData: ShareData = {
+        files: [file],
+        text: message,
+        title: receiptPdfFileName(receipt),
+      };
+
+      if (navigator.canShare?.(shareData)) {
+        await navigator.share(shareData);
+        return;
+      }
+
+      downloadPdfBlob(file, file.name);
+
+      const tenantUrl =
+        viewer === "admin" && receipt.tenantPhone
+          ? toTenantWhatsAppUrl(receipt.tenantPhone, message)
+          : null;
+      const whatsAppUrl =
+        tenantUrl ?? `https://wa.me/?text=${encodeURIComponent(message)}`;
+
+      window.open(whatsAppUrl, "_blank", "noopener,noreferrer");
+    } catch (shareError) {
+      setError(
+        shareError instanceof Error
+          ? shareError.message
+          : "Could not share the receipt PDF."
+      );
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
-    <a
-      href={share?.href ?? "#"}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-disabled={!share}
-      onClick={(event) => {
-        if (!share) event.preventDefault();
-      }}
-      className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1ebe5d] aria-disabled:pointer-events-none aria-disabled:opacity-60"
-    >
-      <WhatsAppIcon />
-      {share?.targetsTenant ? "Share on WhatsApp" : "Share via WhatsApp"}
-    </a>
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={() => void handleShare()}
+        disabled={pending}
+        className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1ebe5d] disabled:opacity-60"
+      >
+        <WhatsAppIcon />
+        {pending ? "Preparing PDF…" : "Share PDF on WhatsApp"}
+      </button>
+      <span className="max-w-xs text-right text-xs text-slate-500">
+        {viewer === "admin" && !receipt.tenantPhone
+          ? "PDF attaches on phone; on desktop it downloads first, then WhatsApp opens."
+          : "Shares the receipt as a PDF attachment on supported devices."}
+      </span>
+      {error ? (
+        <span className="max-w-xs text-right text-xs text-red-600">{error}</span>
+      ) : null}
+    </div>
   );
 }
 

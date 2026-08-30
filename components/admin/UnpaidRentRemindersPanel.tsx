@@ -94,7 +94,8 @@ export default function UnpaidRentRemindersPanel({
           Monthly dues unpaid · {billingMonthLabel}
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          Rent plus maintenance, parking, washer, and other monthly charges.
+          Rent plus maintenance, parking, washer, other monthly charges, and
+          electricity.
           {whatsappApiEnabled
             ? " Send directly from your business WhatsApp API, or open a draft in WhatsApp Web."
             : " Open WhatsApp with a pre-filled message, then mark reminded."}
@@ -165,6 +166,9 @@ export default function UnpaidRentRemindersPanel({
                       Rent {formatInr(row.rentDue)}
                       {row.chargesDue > 0
                         ? ` · charges ${formatInr(row.chargesDue)}`
+                        : ""}
+                      {row.electricityCharge > 0
+                        ? ` · electricity ${formatInr(row.electricityCharge)}`
                         : ""}
                       {row.maintenanceCharge > 0
                         ? ` (maint ${formatInr(row.maintenanceCharge)}`

@@ -9,6 +9,7 @@ import {
   calculateCommonSharePerFlat,
   calculateFlatElectricityBill,
   DEFAULT_ELECTRICITY_BILLING_CONFIG,
+  roundElectricityDue,
   type ElectricityBillingConfig,
   type FlatElectricityBillBreakdown,
 } from "@/lib/electricity-billing";
@@ -293,7 +294,8 @@ function mapReadingRow(row: Record<string, unknown>): ElectricityReading {
       row.service_charge_amount == null
         ? null
         : num(row.service_charge_amount),
-    billAmount: row.bill_amount == null ? null : num(row.bill_amount),
+    billAmount:
+      row.bill_amount == null ? null : roundElectricityDue(num(row.bill_amount)),
     status: String(row.status ?? "recorded").trim() || "recorded",
     notes: (row.notes as string | null) ?? null,
     billingMonth: run?.billing_month ?? null,
@@ -619,7 +621,8 @@ export async function createElectricityReading(
       previous_reading: input.previousReading,
       current_reading: input.currentReading,
       flat_units: Math.max(0, input.currentReading - input.previousReading),
-      bill_amount: input.billAmount ?? null,
+      bill_amount:
+        input.billAmount == null ? null : roundElectricityDue(input.billAmount),
       status: input.status?.trim() || "recorded",
       notes: input.notes?.trim() || null,
     })

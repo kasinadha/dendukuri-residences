@@ -61,10 +61,7 @@ export async function listUnpaidRentReminders(
 }> {
   const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
   const unpaid = summary.rows.filter(
-    (row) =>
-      row.outstanding > 0 &&
-      row.status !== "paid" &&
-      row.status !== "waived"
+    (row) => row.status !== "paid" && row.status !== "waived"
   );
 
   if (unpaid.length === 0) {
