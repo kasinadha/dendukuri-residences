@@ -3,21 +3,26 @@ import ElectricityBillingPanel from "@/components/admin/ElectricityBillingPanel"
 import ElectricityForm from "@/components/admin/ElectricityForm";
 import { requireAdmin } from "@/lib/auth";
 import {
+  getLastBuildingMeterReading,
   listElectricityBillingRuns,
   listElectricityReadings,
   listFlatsForSelect,
   listOccupiedFlatsForBilling,
 } from "@/lib/electricity";
+import { buildingWingLabel } from "@/lib/building-wing";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default async function ElectricityPage() {
   const { supabase } = await requireAdmin();
-  const [flats, occupiedFlats, readings, billingRuns] = await Promise.all([
-    listFlatsForSelect(supabase),
-    listOccupiedFlatsForBilling(supabase),
-    listElectricityReadings(supabase),
-    listElectricityBillingRuns(supabase),
-  ]);
+  const [flats, occupiedFlats, readings, billingRuns, lastBuildingC, lastBuildingD] =
+    await Promise.all([
+      listFlatsForSelect(supabase),
+      listOccupiedFlatsForBilling(supabase),
+      listElectricityReadings(supabase),
+      listElectricityBillingRuns(supabase),
+      getLastBuildingMeterReading(supabase, "C"),
+      getLastBuildingMeterReading(supabase, "D"),
+    ]);
 
   return (
     <AdminLayout>
@@ -27,14 +32,18 @@ export default async function ElectricityPage() {
           Electricity
         </h2>
         <p className="mt-2 max-w-3xl text-slate-500">
-          Enter building + flat cumulative meter readings to auto-calculate dues
-          per flat: (flat units + common share) × ₹8 + ₹120/kW × sanctioned kW
-          (default 2 kW), plus 9% service charge.
+          Enter the <strong>Building C</strong> or <strong>Building D</strong> main
+          meter readings separately, plus each flat&apos;s cumulative meter. Common
+          area for that wing = building usage − sum of flat usage in the same wing,
+          shared only among occupied flats in that wing.
         </p>
       </div>
 
       <div className="mt-8">
-        <ElectricityBillingPanel occupiedFlats={occupiedFlats} />
+        <ElectricityBillingPanel
+          occupiedFlats={occupiedFlats}
+          lastBuildingReadings={{ C: lastBuildingC, D: lastBuildingD }}
+        />
       </div>
 
       {billingRuns.length > 0 ? (
@@ -50,7 +59,8 @@ export default async function ElectricityPage() {
               >
                 <div>
                   <p className="font-semibold text-slate-900">
-                    {run.billingMonth} · {formatDisplayDate(run.readingDate)}
+                    {buildingWingLabel(run.buildingWing)} · {run.billingMonth} ·{" "}
+                    {formatDisplayDate(run.readingDate)}
                   </p>
                   <p className="text-sm text-slate-500">
                     Building {run.buildingUnits} units · common{" "}

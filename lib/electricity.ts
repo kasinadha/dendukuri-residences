@@ -36,6 +36,7 @@ export type OccupiedFlatForBilling = {
   flatId: string;
   flatNumber: string;
   tenantName: string;
+  buildingWing: "C" | "D" | null;
   previousReading: number;
   sanctionedKw: number;
 };
@@ -44,6 +45,9 @@ export type ElectricityBillingRunSummary = {
   id: string;
   billingMonth: string;
   readingDate: string;
+  buildingWing: "C" | "D" | null;
+  buildingPreviousReading: number;
+  buildingCurrentReading: number;
   buildingUnits: number;
   commonAreaUnits: number;
   occupiedFlatsCount: number;
@@ -117,6 +121,7 @@ export async function listOccupiedFlatsForBilling(
       flatId: flat.id,
       flatNumber: flat.flat_number?.trim() || "—",
       tenantName: tenant?.full_name?.trim() || "Tenant",
+      buildingWing: buildingWingFromFlatNumber(flat.flat_number),
       previousReading: last?.currentReading ?? 0,
       sanctionedKw: 2,
     });
@@ -237,6 +242,7 @@ export async function listElectricityBillingRuns(
       reading_date,
       building_previous_reading,
       building_current_reading,
+      building_wing,
       common_area_units,
       occupied_flats_count,
       rate_per_unit,
@@ -262,6 +268,12 @@ export async function listElectricityBillingRuns(
       id: row.id,
       billingMonth: row.billing_month,
       readingDate: row.reading_date,
+      buildingWing:
+        row.building_wing === "C" || row.building_wing === "D"
+          ? row.building_wing
+          : null,
+      buildingPreviousReading: num(row.building_previous_reading),
+      buildingCurrentReading: num(row.building_current_reading),
       buildingUnits: Math.max(
         0,
         num(row.building_current_reading) - num(row.building_previous_reading)
@@ -348,9 +360,38 @@ export function previewElectricityBills(input: {
   };
 }
 
+export async function getLastBuildingMeterReading(
+  supabase: SupabaseClient,
+  buildingWing: "C" | "D"
+): Promise<number | null> {
+  let query = await supabase
+    .from("electricity_billing_runs")
+    .select("building_current_reading, reading_date")
+    .eq("building_wing", buildingWing)
+    .order("reading_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (
+    query.error &&
+    /building_wing|does not exist|schema cache/i.test(query.error.message)
+  ) {
+    query = await supabase
+      .from("electricity_billing_runs")
+      .select("building_current_reading, reading_date")
+      .order("reading_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  }
+
+  if (query.error || !query.data) return null;
+  return num(query.data.building_current_reading);
+}
+
 export async function createElectricityBillingRun(
   supabase: SupabaseClient,
   input: {
+    buildingWing: "C" | "D";
     billingMonth?: string;
     readingDate: string;
     buildingPreviousReading: number;
@@ -411,6 +452,7 @@ export async function createElectricityBillingRun(
     .insert({
       billing_month: billingMonth,
       reading_date: input.readingDate,
+      building_wing: input.buildingWing,
       building_previous_reading: input.buildingPreviousReading,
       building_current_reading: input.buildingCurrentReading,
       building_sanctioned_kw: input.buildingSanctionedKw ?? 14,
@@ -430,7 +472,13 @@ export async function createElectricityBillingRun(
       return {
         ok: false,
         error:
-          "Run supabase/migrations/20260829_electricity_billing.sql in Supabase SQL Editor.",
+          "Run supabase/migrations/20260829_electricity_billing.sql and 20260830_electricity_building_wing.sql in Supabase SQL Editor.",
+      };
+    }
+    if (/unique|duplicate/i.test(runError?.message ?? "")) {
+      return {
+        ok: false,
+        error: `A billing run for Building ${input.buildingWing} already exists for this month and reading date.`,
       };
     }
     return { ok: false, error: runError?.message ?? "Could not save billing run." };

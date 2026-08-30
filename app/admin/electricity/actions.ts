@@ -63,11 +63,16 @@ export async function generateElectricityBillingAction(formData: FormData) {
     });
   }
 
-  const billingMonthRaw = asString(formData, "billing_month");
-  const billingMonth = billingMonthRaw.replace("/", "-");
+  const billingMonth = asString(formData, "billing_month");
+  const billingMonthKey = billingMonth.replace("/", "-");
+  const buildingWingRaw = asString(formData, "building_wing").toUpperCase();
+  if (buildingWingRaw !== "C" && buildingWingRaw !== "D") {
+    return { ok: false as const, error: "Select Building C or Building D." };
+  }
 
   const result = await createElectricityBillingRun(supabase, {
-    billingMonth,
+    buildingWing: buildingWingRaw,
+    billingMonth: billingMonthKey,
     readingDate: asString(formData, "reading_date"),
     buildingPreviousReading: Number(
       asString(formData, "building_previous_reading")
