@@ -1,8 +1,10 @@
 "use server";
 
+import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { classifyLoginIdentifier } from "@/lib/login-identifier";
 import { createClient } from "@/lib/supabase/server";
+import { tenantLoginEmailFromMobile } from "@/lib/tenant-auth";
 
 export type SignInResult = { ok: false; error: string };
 
@@ -86,39 +88,51 @@ export async function signInWithPasswordAction(
   const supabase = await createClient();
   const resolved = await resolveEmailForSignIn(supabase, identifier);
 
-  if (resolved.error && !resolved.email) {
+  if (resolved.error && !resolved.email && !resolved.mobile) {
     return { ok: false, error: resolved.error };
   }
 
-  let authData: Awaited<
-    ReturnType<typeof supabase.auth.signInWithPassword>
-  >["data"] | null = null;
+  // Drop stale/partial SSR cookies so repeat sign-in does not fail after logout.
+  await supabase.auth.signOut({ scope: "global" });
+
+  const loginEmails: string[] = [];
+  if (resolved.email) loginEmails.push(resolved.email);
+  if (resolved.mobile) {
+    const synthetic = tenantLoginEmailFromMobile(resolved.mobile);
+    if (!loginEmails.includes(synthetic)) loginEmails.push(synthetic);
+  }
+
+  let signedInUser: User | null = null;
   let signInError: { message: string } | null = null;
 
-  if (resolved.email) {
+  for (const email of loginEmails) {
     const result = await supabase.auth.signInWithPassword({
-      email: resolved.email,
+      email,
       password,
     });
-    authData = result.data;
+    if (!result.error && result.data.user) {
+      signedInUser = result.data.user;
+      signInError = null;
+      break;
+    }
     signInError = result.error;
   }
 
-  // Fallback: Auth phone identity (+91…) if email resolve missed
-  if ((!authData?.user || signInError) && resolved.mobile) {
+  // Fallback: Auth phone identity (+91…) when email paths fail
+  if (!signedInUser && resolved.mobile) {
     const phoneResult = await supabase.auth.signInWithPassword({
       phone: `+91${resolved.mobile}`,
       password,
     });
     if (!phoneResult.error && phoneResult.data.user) {
-      authData = phoneResult.data;
+      signedInUser = phoneResult.data.user;
       signInError = null;
-    } else if (!resolved.email) {
+    } else {
       signInError = phoneResult.error ?? signInError;
     }
   }
 
-  if (signInError || !authData?.user) {
+  if (signInError || !signedInUser) {
     const msg = signInError?.message || "Sign-in failed.";
     if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
       return {
@@ -131,13 +145,13 @@ export async function signInWithPasswordAction(
       return {
         ok: false,
         error:
-          "Invalid credentials, or this mobile is not linked yet. Owner must set tenants.phone and tenants.profile_id to your Auth user.",
+          "Invalid mobile or password. If you just received login details, try again or ask the owner to reset your password from Admin → Tenants.",
       };
     }
     return { ok: false, error: msg };
   }
 
-  const userId = authData.user.id;
+  const userId = signedInUser.id;
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
