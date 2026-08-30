@@ -4,7 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { classifyLoginIdentifier } from "@/lib/login-identifier";
 import { createClient } from "@/lib/supabase/server";
-import { tenantLoginEmailFromMobile } from "@/lib/tenant-auth";
+import { tenantLoginEmailCandidates } from "@/lib/tenant-auth";
 
 export type SignInResult = { ok: false; error: string };
 
@@ -68,7 +68,7 @@ export async function signInWithPasswordAction(
   const identifier = String(
     formData.get("identifier") ?? formData.get("email") ?? ""
   ).trim();
-  const password = String(formData.get("password") ?? "");
+  const password = String(formData.get("password") ?? "").trim();
   const loginAs = parseLoginAs(String(formData.get("login_as") ?? ""));
 
   if (!loginAs) {
@@ -92,17 +92,18 @@ export async function signInWithPasswordAction(
     return { ok: false, error: resolved.error };
   }
 
-  // Drop stale/partial SSR cookies so repeat sign-in does not fail after logout.
-  await supabase.auth.signOut({ scope: "global" });
+  const {
+    data: { user: existingUser },
+  } = await supabase.auth.getUser();
+  if (existingUser) {
+    await supabase.auth.signOut({ scope: "local" });
+  }
 
-  const loginEmails: string[] = [];
-  if (resolved.mobile) {
-    const synthetic = tenantLoginEmailFromMobile(resolved.mobile);
-    loginEmails.push(synthetic);
-  }
-  if (resolved.email && !loginEmails.includes(resolved.email)) {
-    loginEmails.push(resolved.email);
-  }
+  const loginEmails = resolved.mobile
+    ? tenantLoginEmailCandidates(resolved.mobile, resolved.email)
+    : resolved.email
+      ? [resolved.email]
+      : [];
 
   let signedInUser: User | null = null;
   let signInError: { message: string } | null = null;
@@ -137,7 +138,7 @@ export async function signInWithPasswordAction(
       return {
         ok: false,
         error:
-          "Invalid mobile or password. If you just received login details, try again or ask the owner to reset your password from Admin → Tenants.",
+          "Invalid mobile or password. Ask the owner to open Admin → Tenants → Reset password for your name, then try again.",
       };
     }
     return { ok: false, error: msg };

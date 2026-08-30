@@ -5,10 +5,38 @@ import {
 } from "@/lib/login-identifier";
 
 const LOGIN_EMAIL_DOMAIN = "tenant-auth.invalid";
+const LEGACY_LOGIN_EMAIL_DOMAIN = "login.dendukuri.local";
 
 /** Internal Auth email — tenant signs in with mobile, not this address. */
 export function tenantLoginEmailFromMobile(mobile: string): string {
   return `${mobile}@${LOGIN_EMAIL_DOMAIN}`;
+}
+
+/** All Auth emails to try when a tenant signs in with mobile. */
+export function tenantLoginEmailCandidates(
+  mobile: string,
+  resolvedEmail?: string | null
+): string[] {
+  const emails: string[] = [];
+  const add = (value: string | null | undefined) => {
+    const email = value?.trim().toLowerCase();
+    if (email && !emails.includes(email)) emails.push(email);
+  };
+
+  add(tenantLoginEmailFromMobile(mobile));
+  add(`tenant+${mobile}@${LEGACY_LOGIN_EMAIL_DOMAIN}`);
+  add(resolvedEmail);
+
+  return emails;
+}
+
+function preferredTenantLoginEmail(
+  mobile: string,
+  optionalEmail?: string | null
+): string {
+  const email = optionalEmail?.trim().toLowerCase();
+  if (email && email.includes("@")) return email;
+  return tenantLoginEmailFromMobile(mobile);
 }
 
 function authPhoneE164(mobile: string): string {
@@ -112,7 +140,10 @@ export async function createTenantPortalLogin(
     if (/already registered|already exists|duplicate/i.test(msg)) {
       // Previous attempt may have created Auth user then failed on link —
       // recover by finding that user and completing profile + tenant link.
-      const existing = await findAuthUserByLoginEmail(admin, loginEmail);
+      let existing = await findAuthUserByLoginEmail(admin, loginEmail);
+      if (!existing) {
+        existing = await findAuthUserByMobile(admin, mobile);
+      }
       if (!existing) {
         return {
           ok: false,
@@ -122,10 +153,10 @@ export async function createTenantPortalLogin(
       }
       userId = existing.id;
       createdNewAuthUser = false;
-      // Ensure password matches what admin just entered
+      // Ensure password and login email match what admin just entered
       const { error: pwdError } = await admin.auth.admin.updateUserById(
         userId,
-        { password, email_confirm: true }
+        { password, email: loginEmail, email_confirm: true }
       );
       if (pwdError) {
         return {
@@ -184,6 +215,31 @@ export async function createTenantPortalLogin(
   return { ok: true, userId, loginEmail };
 }
 
+async function findAuthUserByMobile(
+  admin: SupabaseClient,
+  mobile: string
+): Promise<{ id: string } | null> {
+  const target = mobile.slice(-10);
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+    if (error || !data?.users?.length) break;
+
+    const match = data.users.find((user) => {
+      const digits = (user.phone ?? "").replace(/\D/g, "");
+      return digits.slice(-10) === target;
+    });
+    if (match) return { id: match.id };
+
+    if (data.users.length < 200) break;
+  }
+
+  return null;
+}
+
 async function findAuthUserByLoginEmail(
   admin: SupabaseClient,
   loginEmail: string
@@ -232,7 +288,7 @@ export async function resetTenantPortalPassword(
 
   const { data: tenant, error: tenantError } = await admin
     .from("tenants")
-    .select("profile_id")
+    .select("profile_id,phone,email")
     .eq("id", tenantId)
     .maybeSingle();
 
@@ -243,11 +299,47 @@ export async function resetTenantPortalPassword(
     };
   }
 
-  const { error } = await admin.auth.admin.updateUserById(tenant.profile_id, {
+  const mobile = normalizeIndianMobile(tenant.phone ?? "");
+  if (!mobile) {
+    return {
+      ok: false,
+      error:
+        "Tenant phone is missing or invalid. Set a 10-digit phone on the tenant row, then reset password again.",
+    };
+  }
+
+  const loginEmail = preferredTenantLoginEmail(mobile, tenant.email);
+
+  let { error } = await admin.auth.admin.updateUserById(tenant.profile_id, {
     password,
+    email: loginEmail,
+    email_confirm: true,
+    phone: authPhoneE164(mobile),
+    phone_confirm: true,
   });
 
+  if (error && /phone|sms|provider/i.test(error.message)) {
+    ({ error } = await admin.auth.admin.updateUserById(tenant.profile_id, {
+      password,
+      email: loginEmail,
+      email_confirm: true,
+    }));
+  }
+
   if (error) return { ok: false, error: error.message };
+
+  const { error: phoneError } = await admin
+    .from("tenants")
+    .update({ phone: mobile })
+    .eq("id", tenantId);
+
+  if (phoneError) {
+    return {
+      ok: false,
+      error: `Password updated, but could not normalize tenant phone (${phoneError.message}).`,
+    };
+  }
+
   return { ok: true };
 }
 

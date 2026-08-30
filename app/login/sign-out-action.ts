@@ -5,6 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function signOutAction(loginAs: "admin" | "tenant" = "admin") {
   const supabase = await createClient();
-  await supabase.auth.signOut({ scope: "global" });
+  await supabase.auth.signOut();
   redirect(`/login?as=${loginAs}`);
 }
