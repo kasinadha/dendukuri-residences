@@ -1,6 +1,7 @@
 import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
 import FormerTenantActions from "@/components/admin/FormerTenantActions";
+import SyncMoveInDatesButton from "@/components/admin/SyncMoveInDatesButton";
 import TenantDetailsEditor from "@/components/admin/TenantDetailsEditor";
 import TenantLoginActions from "@/components/admin/TenantLoginActions";
 import TenantOccupancyActions from "@/components/admin/TenantOccupancyActions";
@@ -55,9 +56,9 @@ export default async function TenantsPage({
             Tenants
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Active tenants with linked flat, rent, monthly charges, and
-            advance/deposit. Contact details are freely editable; rent, charges,
-            and advance are locked and need confirmation to change.
+            Active tenants with linked flat, rent, monthly charges, move-in date,
+            and advance/deposit. Contact details are freely editable; rent,
+            charges, and advance are locked and need confirmation to change.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -167,6 +168,10 @@ export default async function TenantsPage({
           </p>
         </div>
       ) : null}
+
+      <div className="mt-6">
+        <SyncMoveInDatesButton />
+      </div>
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {listedTenants.length === 0 ? (
@@ -334,7 +339,9 @@ export default async function TenantsPage({
                       }`}
                     >
                       {tenant.hasActiveTenancy
-                        ? tenant.tenancyStatus ?? "active"
+                        ? tenant.moveInDate
+                          ? `moved in ${formatDisplayDate(tenant.moveInDate)}`
+                          : tenant.tenancyStatus ?? "active"
                         : tenant.vacatedDate
                           ? `vacated · ${formatDisplayDate(tenant.vacatedDate)}`
                           : tenant.tenancyStatus ?? "former"}
@@ -391,6 +398,7 @@ export default async function TenantsPage({
                       monthlyCharges={tenant.monthlyCharges}
                       tenancyId={tenant.tenancyId}
                       hasActiveTenancy={tenant.hasActiveTenancy}
+                      moveInDate={tenant.moveInDate}
                     />
                   </div>
                 </li>

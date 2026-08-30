@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   updateTenantDetailsAction,
   updateTenantTermsAction,
+  updateTenancyMoveInDateAction,
 } from "@/app/admin/tenants/actions";
 import { formatInr } from "@/lib/receipts";
 import type { TenantMonthlyCharges } from "@/lib/tenant-charges";
@@ -21,6 +22,7 @@ type Props = {
   monthlyCharges: TenantMonthlyCharges | null;
   tenancyId: string | null;
   hasActiveTenancy: boolean;
+  moveInDate: string | null;
 };
 
 function formatShortDate(iso: string | null): string {
@@ -52,10 +54,12 @@ export default function TenantDetailsEditor({
   monthlyCharges,
   tenancyId,
   hasActiveTenancy,
+  moveInDate,
 }: Props) {
   const router = useRouter();
   const [contactOpen, setContactOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [moveInOpen, setMoveInOpen] = useState(false);
   const [termsConfirmed, setTermsConfirmed] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -224,12 +228,53 @@ export default function TenantDetailsEditor({
     });
   }
 
+  function handleMoveInSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (!tenancyId) return;
+
+    const formData = new FormData(event.currentTarget);
+    formData.set("tenancy_id", tenancyId);
+    const nextDate = String(formData.get("start_date") ?? "");
+    const prevDate = moveInDate ?? "";
+
+    if (nextDate === prevDate) {
+      setSuccess("No change to move-in date.");
+      setMoveInOpen(false);
+      return;
+    }
+
+    const ok = window.confirm(
+      `Set move-in date to ${nextDate ? formatShortDate(nextDate) : "not set"}?\n\nMove-in month has no dues; billing starts the month after move-in.`
+    );
+    if (!ok) return;
+
+    startTransition(async () => {
+      const result = await updateTenancyMoveInDateAction(formData);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setSuccess("Move-in date saved.");
+      setMoveInOpen(false);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-2">
       {hasActiveTenancy ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
           <p className="font-semibold text-slate-800">Locked terms</p>
           <p className="mt-1">
+            Move-in {formatShortDate(moveInDate)}
+            {!moveInDate ? (
+              <span className="text-amber-800"> · not set — dues may be wrong</span>
+            ) : null}
+          </p>
+          <p>
             Rent {describeAmount(monthlyRent)}
           </p>
           <p>
@@ -287,6 +332,22 @@ export default function TenantDetailsEditor({
           <button
             type="button"
             onClick={() => {
+              setMoveInOpen((value) => !value);
+              setContactOpen(false);
+              setTermsOpen(false);
+              setError("");
+              setSuccess("");
+            }}
+            className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100"
+          >
+            {moveInOpen ? "Close" : "Edit move-in date"}
+          </button>
+        ) : null}
+
+        {hasActiveTenancy && tenancyId ? (
+          <button
+            type="button"
+            onClick={() => {
               setTermsOpen((value) => !value);
               setContactOpen(false);
               setTermsConfirmed(false);
@@ -300,8 +361,46 @@ export default function TenantDetailsEditor({
         ) : null}
       </div>
 
-      {success && !contactOpen && !termsOpen ? (
+      {success && !contactOpen && !termsOpen && !moveInOpen ? (
         <p className="text-xs text-emerald-700">{success}</p>
+      ) : null}
+
+      {moveInOpen && hasActiveTenancy && tenancyId ? (
+        <form
+          onSubmit={handleMoveInSubmit}
+          className="rounded-xl border border-sky-200 bg-sky-50/60 p-3"
+        >
+          <p className="text-xs font-semibold text-sky-950">Move-in date</p>
+          <p className="mt-1 text-xs text-sky-900/80">
+            The month they moved in has no rent, charges, or electricity dues.
+            Dues start from the following calendar month.
+          </p>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-xs font-semibold text-slate-600">
+              Move-in date
+            </span>
+            <input
+              type="date"
+              name="start_date"
+              defaultValue={moveInDate ?? ""}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+
+          {error && moveInOpen ? (
+            <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={pending}
+            className="mt-3 rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save move-in date"}
+          </button>
+        </form>
       ) : null}
 
       {contactOpen ? (
