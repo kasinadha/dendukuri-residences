@@ -1,5 +1,6 @@
 import Link from "next/link";
 import PrintReceiptButton from "@/components/receipts/PrintReceiptButton";
+import ShareReceiptWhatsAppButton from "@/components/receipts/ShareReceiptWhatsAppButton";
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import type { ReceiptViewModel } from "@/lib/receipts";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
@@ -35,7 +36,10 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
         >
           ← Back
         </Link>
-        <PrintReceiptButton />
+        <div className="flex flex-wrap items-center gap-2">
+          <ShareReceiptWhatsAppButton receipt={receipt} viewer={viewer} />
+          <PrintReceiptButton />
+        </div>
       </div>
 
       <article className="receipt-sheet rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10 print:rounded-none print:border-0 print:shadow-none">

@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
-import { appendDuesBreakdownToNotes } from "@/lib/dues-breakdown";
+import {
+  appendDuesBreakdownToNotes,
+  applyAdditionalPaymentToBreakdown,
+} from "@/lib/dues-breakdown";
 import {
   approvePaymentSubmission,
   rejectPaymentSubmission,
@@ -157,6 +160,15 @@ export async function recordRentPayment(
     flatId: flat?.id ?? "",
     billingMonthKey: billingMonth,
   });
+  const duesBreakdown =
+    breakdownResult.ok && !waived
+      ? applyAdditionalPaymentToBreakdown(
+          breakdownResult.breakdown,
+          amountPaid
+        )
+      : breakdownResult.ok
+        ? breakdownResult.breakdown
+        : null;
 
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId: explicitReceiverAccountId,
@@ -177,7 +189,7 @@ export async function recordRentPayment(
     status,
     notes: appendDuesBreakdownToNotes(
       encodeBillingMonthNote(billingMonth, notes || undefined),
-      breakdownResult.ok ? breakdownResult.breakdown : null
+      duesBreakdown
     ),
   };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import {
   fetchTenancyDuesBreakdownAction,
   recordRentPayment,
@@ -9,7 +9,10 @@ import {
 import AccountSelectField from "@/components/admin/AccountSelectField";
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import { computePaymentStatus } from "@/lib/payment-status";
-import type { DuesBreakdown } from "@/lib/dues-breakdown";
+import {
+  applyAdditionalPaymentToBreakdown,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
 
 export type TenancyOption = {
@@ -81,6 +84,11 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
     Number.isFinite(dueNum) && Number.isFinite(paidNum)
       ? computePaymentStatus(dueNum, paidNum)
       : null;
+  const previewBreakdown = useMemo(() => {
+    if (!breakdown) return null;
+    if (!Number.isFinite(paidNum) || paidNum <= 0) return breakdown;
+    return applyAdditionalPaymentToBreakdown(breakdown, paidNum);
+  }, [breakdown, paidNum]);
 
   useEffect(() => {
     if (!tenancyId || !selected?.flatId || !billingMonth) return;
@@ -315,11 +323,11 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
         </label>
       </div>
 
-      {breakdown ? (
+      {previewBreakdown ? (
         <div className="mt-6">
           <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
           <div className="mt-3">
-            <DuesBreakdownTable breakdown={breakdown} />
+            <DuesBreakdownTable breakdown={previewBreakdown} />
           </div>
         </div>
       ) : breakdownError ? (

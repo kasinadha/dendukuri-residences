@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DuesBreakdown, DuesBreakdownLine } from "@/lib/dues-breakdown";
-import { parseDuesBreakdownFromNotes } from "@/lib/dues-breakdown";
+import {
+  allocatePaymentsAcrossLines,
+  computeBreakdownTotals,
+  parseDuesBreakdownFromNotes,
+} from "@/lib/dues-breakdown";
 import { listElectricityReadings } from "@/lib/electricity";
 import { getTenantMonthDue } from "@/lib/reminders";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -77,8 +81,8 @@ export async function getTenancyDuesBreakdown(
       key: "rent",
       label: "Rent",
       due: monthDue.rentDue,
-      paid: monthDue.rentPaid,
-      outstanding: Math.max(0, monthDue.rentDue - monthDue.rentPaid),
+      paid: 0,
+      outstanding: monthDue.rentDue,
     });
   }
 
@@ -141,18 +145,9 @@ export async function getTenancyDuesBreakdown(
     });
   }
 
-  let chargesPaidLeft = monthDue.chargesPaid;
-  for (const line of lines) {
-    if (line.key === "rent" || line.key === "electricity") continue;
-    const paid = Math.min(line.due, chargesPaidLeft);
-    line.paid = paid;
-    line.outstanding = Math.max(0, line.due - paid);
-    chargesPaidLeft -= paid;
-  }
+  allocatePaymentsAcrossLines(lines, monthDue.amountPaid);
 
-  const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
-  const totalPaid = lines.reduce((sum, line) => sum + line.paid, 0);
-  const totalOutstanding = Math.max(0, monthDue.outstanding);
+  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
 
   return {
     ok: true,

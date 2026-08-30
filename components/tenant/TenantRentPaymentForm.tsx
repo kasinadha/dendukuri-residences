@@ -7,7 +7,10 @@ import {
   tenantSubmitRentPayment,
 } from "@/app/tenant/actions";
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
-import type { DuesBreakdown } from "@/lib/dues-breakdown";
+import {
+  applyAdditionalPaymentToBreakdown,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
 import {
   buildUpiPayLink,
   buildUpiQrImageUrl,
@@ -44,6 +47,11 @@ export default function TenantRentPaymentForm({
   const [breakdownError, setBreakdownError] = useState("");
 
   const amountNum = Number(amount);
+  const previewBreakdown = useMemo(() => {
+    if (!breakdown) return null;
+    if (!Number.isFinite(amountNum) || amountNum <= 0) return breakdown;
+    return applyAdditionalPaymentToBreakdown(breakdown, amountNum);
+  }, [breakdown, amountNum]);
   const upiLink = useMemo(() => {
     if (!upiId || !Number.isFinite(amountNum) || amountNum <= 0) return null;
     return buildUpiPayLink({
@@ -85,8 +93,8 @@ export default function TenantRentPaymentForm({
     setSuccess("");
     const formData = new FormData(event.currentTarget);
     formData.set("tenancy_id", tenancyId);
-    if (breakdown) {
-      formData.set("dues_breakdown_json", JSON.stringify(breakdown));
+    if (previewBreakdown) {
+      formData.set("dues_breakdown_json", JSON.stringify(previewBreakdown));
     }
     startTransition(async () => {
       try {
@@ -261,11 +269,11 @@ export default function TenantRentPaymentForm({
           </label>
         </div>
 
-        {breakdown ? (
+        {previewBreakdown ? (
           <div className="mt-6">
             <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
             <div className="mt-3">
-              <DuesBreakdownTable breakdown={breakdown} />
+              <DuesBreakdownTable breakdown={previewBreakdown} />
             </div>
           </div>
         ) : breakdownError ? (
