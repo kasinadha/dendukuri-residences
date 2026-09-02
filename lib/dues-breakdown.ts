@@ -7,6 +7,9 @@ export type DuesBreakdownLine = {
   /** Prior-month line shown in the current pay view */
   isArrears?: boolean;
   arrearsMonthKey?: string;
+  /** Outstanding portion rolled in from the prior billing month */
+  arrearsOutstanding?: number;
+  arrearsMonthLabel?: string;
 };
 
 export type ArrearsMonthBreakdown = {
@@ -104,6 +107,10 @@ export function applyAdditionalPaymentToBreakdown(
     totalOutstanding,
     arrears: arrears.length > 0 ? arrears : breakdown.arrears,
     grandTotalOutstanding: totalOutstanding + arrearsTotal,
+    priorMonthLabel: breakdown.priorMonthLabel,
+    priorMonthArrearsTotal:
+      arrearsTotal > 0 ? arrearsTotal : breakdown.priorMonthArrearsTotal,
+    infoMessage: breakdown.infoMessage,
   };
 }
 
@@ -117,6 +124,9 @@ export type DuesBreakdown = {
   arrears?: ArrearsMonthBreakdown[];
   /** Current month outstanding + all arrears */
   grandTotalOutstanding?: number;
+  /** Prior billing month with rolled-up arrears (one month back) */
+  priorMonthLabel?: string;
+  priorMonthArrearsTotal?: number;
   /** e.g. move-in month — no dues yet */
   infoMessage?: string;
 };
@@ -167,6 +177,83 @@ export function breakdownGrandOutstanding(breakdown: DuesBreakdown): number {
   return breakdown.grandTotalOutstanding ?? breakdown.totalOutstanding;
 }
 
+const LINE_LABELS: Record<string, string> = {
+  rent: "Rent",
+  maintenance: "Maintenance",
+  parking: "Car parking",
+  washer: "Washing machine",
+  other: "Other monthly",
+  electricity: "Electricity",
+};
+
+function baseLineLabel(key: string, fallback?: string): string {
+  return fallback?.replace(/\s*\([^)]+\)\s*$/, "").trim() || LINE_LABELS[key] || key;
+}
+
+/** Merge prior-month arrears into category rows (rent, electricity, etc.). */
+export function toCombinedBreakdownView(breakdown: DuesBreakdown): DuesBreakdown {
+  const lineMap = new Map<string, DuesBreakdownLine>();
+
+  const mergeLine = (line: DuesBreakdownLine, arrearsMonthLabel?: string) => {
+    const existing = lineMap.get(line.key);
+    if (!existing) {
+      lineMap.set(line.key, {
+        key: line.key,
+        label: baseLineLabel(line.key, line.label),
+        due: line.due,
+        paid: line.paid,
+        outstanding: line.outstanding,
+        arrearsOutstanding: arrearsMonthLabel && line.outstanding > 0
+          ? line.outstanding
+          : undefined,
+        arrearsMonthLabel:
+          arrearsMonthLabel && line.outstanding > 0 ? arrearsMonthLabel : undefined,
+      });
+      return;
+    }
+
+    existing.due += line.due;
+    existing.paid += line.paid;
+    existing.outstanding += line.outstanding;
+    if (arrearsMonthLabel && line.outstanding > 0) {
+      existing.arrearsOutstanding =
+        (existing.arrearsOutstanding ?? 0) + line.outstanding;
+      existing.arrearsMonthLabel = arrearsMonthLabel;
+    }
+  };
+
+  for (const month of breakdown.arrears ?? []) {
+    for (const line of month.lines) {
+      mergeLine(line, month.billingMonthLabel);
+    }
+  }
+  for (const line of breakdown.lines) {
+    mergeLine(line);
+  }
+
+  const lines = [
+    ...DUES_LINE_ALLOCATION_ORDER.map((key) => lineMap.get(key)).filter(
+      (line): line is DuesBreakdownLine => line != null
+    ),
+    ...[...lineMap.values()].filter(
+      (line) => !DUES_LINE_ALLOCATION_ORDER.includes(line.key as (typeof DUES_LINE_ALLOCATION_ORDER)[number])
+    ),
+  ];
+
+  const totals = computeBreakdownTotals(lines);
+  const priorMonthArrearsTotal = breakdown.priorMonthArrearsTotal ?? 0;
+
+  return {
+    ...breakdown,
+    lines,
+    ...totals,
+    grandTotalOutstanding: totals.totalOutstanding,
+    priorMonthLabel: breakdown.priorMonthLabel,
+    priorMonthArrearsTotal:
+      priorMonthArrearsTotal > 0 ? priorMonthArrearsTotal : undefined,
+  };
+}
+
 /** Defaults for pay / record forms — only what is still owed. */
 export function breakdownPaymentAmountDefaults(breakdown: DuesBreakdown): {
   amountDue: string;
@@ -181,24 +268,17 @@ export function breakdownPaymentAmountDefaults(breakdown: DuesBreakdown): {
 export function toOutstandingOnlyBreakdown(
   breakdown: DuesBreakdown
 ): DuesBreakdown {
-  const lines = breakdown.lines.filter((line) => line.outstanding > 0);
-  const arrears = breakdown.arrears
-    ?.map((month) => ({
-      ...month,
-      lines: month.lines.filter((line) => line.outstanding > 0),
-    }))
-    .filter((month) => month.lines.length > 0);
-  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
-  const arrearsTotal =
-    arrears?.reduce((sum, month) => sum + month.totalOutstanding, 0) ?? 0;
+  const combined = breakdown.arrears?.length
+    ? toCombinedBreakdownView(breakdown)
+    : breakdown;
+  const lines = combined.lines.filter((line) => line.outstanding > 0);
+  const totals = computeBreakdownTotals(lines);
 
   return {
-    ...breakdown,
+    ...combined,
     lines,
-    arrears,
-    totalDue,
-    totalPaid,
-    totalOutstanding,
-    grandTotalOutstanding: totalOutstanding + arrearsTotal,
+    arrears: undefined,
+    ...totals,
+    grandTotalOutstanding: totals.totalOutstanding,
   };
 }

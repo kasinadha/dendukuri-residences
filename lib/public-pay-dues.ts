@@ -247,6 +247,7 @@ export async function getTenancyDuesBreakdownWithArrears(
     (sum, month) => sum + month.totalOutstanding,
     0
   );
+  const priorMonth = arrears[0];
 
   return {
     ok: true,
@@ -254,6 +255,8 @@ export async function getTenancyDuesBreakdownWithArrears(
       ...current.breakdown,
       arrears,
       grandTotalOutstanding: current.breakdown.totalOutstanding + arrearsTotal,
+      priorMonthLabel: priorMonth?.billingMonthLabel,
+      priorMonthArrearsTotal: arrearsTotal > 0 ? arrearsTotal : undefined,
     },
   };
 }

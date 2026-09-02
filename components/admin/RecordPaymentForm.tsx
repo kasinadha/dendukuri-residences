@@ -109,10 +109,11 @@ export default function RecordPaymentForm({
   }, [breakdown, paidNum]);
   const electricityOnlyHint = useMemo(() => {
     if (!breakdown) return null;
-    const nonElectricOutstanding = breakdown.lines
+    const view = toOutstandingOnlyBreakdown(breakdown);
+    const nonElectricOutstanding = view.lines
       .filter((line) => line.key !== "electricity")
       .reduce((sum, line) => sum + line.outstanding, 0);
-    const electricity = breakdown.lines.find((line) => line.key === "electricity");
+    const electricity = view.lines.find((line) => line.key === "electricity");
     if (
       nonElectricOutstanding <= 0 &&
       electricity &&
