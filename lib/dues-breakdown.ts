@@ -4,6 +4,16 @@ export type DuesBreakdownLine = {
   due: number;
   paid: number;
   outstanding: number;
+  /** Prior-month line shown in the current pay view */
+  isArrears?: boolean;
+  arrearsMonthKey?: string;
+};
+
+export type ArrearsMonthBreakdown = {
+  billingMonthKey: string;
+  billingMonthLabel: string;
+  lines: DuesBreakdownLine[];
+  totalOutstanding: number;
 };
 
 /** Waterfall order when a lump-sum payment covers multiple dues. */
@@ -53,13 +63,47 @@ export function applyAdditionalPaymentToBreakdown(
   if (!Number.isFinite(additionalPaid) || additionalPaid <= 0) {
     return breakdown;
   }
+
+  let remaining = additionalPaid;
+  const arrears =
+    breakdown.arrears?.map((month) => ({
+      ...month,
+      lines: cloneLines(month.lines),
+    })) ?? [];
+
+  for (const month of [...arrears].reverse()) {
+    for (const key of DUES_LINE_ALLOCATION_ORDER) {
+      const line = month.lines.find((item) => item.key === key);
+      if (!line || line.outstanding <= 0) continue;
+      const applied = Math.min(line.outstanding, remaining);
+      line.paid += applied;
+      line.outstanding -= applied;
+      remaining -= applied;
+    }
+    month.totalOutstanding = month.lines.reduce(
+      (sum, line) => sum + line.outstanding,
+      0
+    );
+  }
+
   const lines = cloneLines(breakdown.lines);
   const priorPaid = lines.reduce((sum, line) => sum + line.paid, 0);
-  allocatePaymentsAcrossLines(lines, priorPaid + additionalPaid);
+  allocatePaymentsAcrossLines(lines, priorPaid + remaining);
+
+  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
+  const arrearsTotal = arrears.reduce(
+    (sum, month) => sum + month.totalOutstanding,
+    0
+  );
+
   return {
     billingMonthKey: breakdown.billingMonthKey,
     lines,
-    ...computeBreakdownTotals(lines),
+    totalDue,
+    totalPaid,
+    totalOutstanding,
+    arrears: arrears.length > 0 ? arrears : breakdown.arrears,
+    grandTotalOutstanding: totalOutstanding + arrearsTotal,
   };
 }
 
@@ -69,6 +113,10 @@ export type DuesBreakdown = {
   totalDue: number;
   totalPaid: number;
   totalOutstanding: number;
+  /** Unpaid balances from earlier billing months */
+  arrears?: ArrearsMonthBreakdown[];
+  /** Current month outstanding + all arrears */
+  grandTotalOutstanding?: number;
 };
 
 export const DUES_BREAKDOWN_PREFIX = "dues_breakdown:";

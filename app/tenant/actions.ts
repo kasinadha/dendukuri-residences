@@ -11,9 +11,10 @@ import {
 } from "@/lib/payment-proofs";
 import { createPaymentSubmission } from "@/lib/payment-submissions";
 import {
-  getTenancyDuesBreakdown,
+  getTenancyDuesBreakdownWithArrears,
   parseDuesBreakdownJson,
 } from "@/lib/public-pay-dues";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveRentUpiDisplay } from "@/lib/rent-upi";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
@@ -39,7 +40,10 @@ export async function fetchTenantDuesBreakdownAction(formData: FormData) {
     return { ok: false as const, error: "Billing month is invalid." };
   }
 
-  return getTenancyDuesBreakdown(supabase, {
+  const admin = createAdminClient();
+  const duesClient = admin.ok ? admin.client : supabase;
+
+  return getTenancyDuesBreakdownWithArrears(duesClient, {
     tenancyId: ctx.tenancyId,
     flatId: ctx.flatId,
     billingMonthKey: billingMonth,
@@ -83,7 +87,9 @@ export async function tenantSubmitRentPayment(formData: FormData) {
     asString(formData, "dues_breakdown_json")
   );
   if (!duesBreakdown && ctx.flatId) {
-    const breakdownResult = await getTenancyDuesBreakdown(supabase, {
+    const admin = createAdminClient();
+    const duesClient = admin.ok ? admin.client : supabase;
+    const breakdownResult = await getTenancyDuesBreakdownWithArrears(duesClient, {
       tenancyId,
       flatId: ctx.flatId,
       billingMonthKey: billingMonth,

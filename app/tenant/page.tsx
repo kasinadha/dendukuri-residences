@@ -134,8 +134,8 @@ export default async function TenantHomePage() {
           {
             href: "/tenant/pay",
             icon: IndianRupee,
-            title: "Pay rent",
-            detail: "UPI / QR + submit UTR for confirmation",
+            title: "Pay dues",
+            detail: "Rent, charges, electricity + submit UTR",
           },
           {
             href: "/tenant/receipts",

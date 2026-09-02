@@ -126,10 +126,60 @@ async function loadActiveTenancies(supabase: SupabaseClient) {
   return [];
 }
 
+function parseBillingMonthFromReadingNotes(
+  notes: string | null | undefined
+): string | null {
+  if (!notes) return null;
+  const match = notes.match(/billing_month:(\d{4}-\d{2})/i);
+  return match?.[1] ?? null;
+}
+
+function readingBillingMonth(
+  row: {
+    notes?: string | null;
+    electricity_billing_runs?:
+      | { billing_month?: string | null }
+      | { billing_month?: string | null }[]
+      | null;
+  }
+): string | null {
+  const run = unwrapOne(row.electricity_billing_runs);
+  return (
+    run?.billing_month?.trim() ||
+    parseBillingMonthFromReadingNotes(row.notes) ||
+    null
+  );
+}
+
+/** Load per-flat electricity due for a billing month (tenant-safe via readings RLS). */
 async function loadElectricityDueByFlatId(
   supabase: SupabaseClient,
   billingMonthKey: string
 ): Promise<Map<string, number>> {
+  const { data: readings, error: readingsError } = await supabase
+    .from("electricity_readings")
+    .select(
+      `
+      flat_id,
+      bill_amount,
+      notes,
+      electricity_billing_runs ( billing_month )
+    `
+    );
+
+  if (!readingsError && readings) {
+    const byFlat = new Map<string, number>();
+    for (const row of readings) {
+      if (readingBillingMonth(row) !== billingMonthKey) continue;
+      const bill = roundElectricityDue(num(row.bill_amount));
+      if (bill <= 0) continue;
+      const flatId = String(row.flat_id);
+      byFlat.set(flatId, (byFlat.get(flatId) ?? 0) + bill);
+    }
+    if (byFlat.size > 0) return byFlat;
+  }
+
+  // Admin fallback when readings lack billing month metadata.
   const { data: runs, error: runsError } = await supabase
     .from("electricity_billing_runs")
     .select("id")
@@ -138,15 +188,15 @@ async function loadElectricityDueByFlatId(
   if (runsError || !runs?.length) return new Map();
 
   const runIds = runs.map((row) => row.id);
-  const { data: readings, error: readingsError } = await supabase
+  const { data: linkedReadings, error: linkedError } = await supabase
     .from("electricity_readings")
     .select("flat_id, bill_amount")
     .in("billing_run_id", runIds);
 
-  if (readingsError || !readings) return new Map();
+  if (linkedError || !linkedReadings) return new Map();
 
   const byFlat = new Map<string, number>();
-  for (const row of readings) {
+  for (const row of linkedReadings) {
     const bill = roundElectricityDue(num(row.bill_amount));
     if (bill <= 0) continue;
     const flatId = String(row.flat_id);

@@ -14,6 +14,7 @@ import {
   type DuesBreakdown,
 } from "@/lib/dues-breakdown";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
+import { formatInr } from "@/lib/receipts";
 
 export type TenancyOption = {
   id: string;
@@ -57,10 +58,11 @@ function paymentAmountDefaults(breakdown: DuesBreakdown): {
   amountDue: string;
   amountPaid: string;
 } {
+  const outstanding =
+    breakdown.grandTotalOutstanding ?? breakdown.totalOutstanding;
   return {
     amountDue: String(breakdown.totalDue),
-    amountPaid:
-      breakdown.totalOutstanding > 0 ? String(breakdown.totalOutstanding) : "",
+    amountPaid: outstanding > 0 ? String(outstanding) : "",
   };
 }
 
@@ -111,6 +113,21 @@ export default function RecordPaymentForm({
     if (!Number.isFinite(paidNum) || paidNum <= 0) return breakdown;
     return applyAdditionalPaymentToBreakdown(breakdown, paidNum);
   }, [breakdown, paidNum]);
+  const electricityOnlyHint = useMemo(() => {
+    if (!breakdown) return null;
+    const nonElectricOutstanding = breakdown.lines
+      .filter((line) => line.key !== "electricity")
+      .reduce((sum, line) => sum + line.outstanding, 0);
+    const electricity = breakdown.lines.find((line) => line.key === "electricity");
+    if (
+      nonElectricOutstanding <= 0 &&
+      electricity &&
+      electricity.outstanding > 0
+    ) {
+      return `Only electricity is outstanding for this month (${formatInr(electricity.outstanding)}). Record that amount to generate a receipt for the electricity portion.`;
+    }
+    return null;
+  }, [breakdown]);
 
   useEffect(() => {
     if (!tenancyId || !selected?.flatId || !billingMonth) return;
@@ -343,6 +360,12 @@ export default function RecordPaymentForm({
           />
         </label>
       </div>
+
+      {electricityOnlyHint ? (
+        <p className="mt-6 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          {electricityOnlyHint}
+        </p>
+      ) : null}
 
       {previewBreakdown ? (
         <div className="mt-6">
