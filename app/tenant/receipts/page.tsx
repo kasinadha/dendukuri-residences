@@ -46,12 +46,36 @@ export default async function TenantReceiptsPage() {
                     </p>
                   </div>
                   <div className="text-left sm:text-right">
-                    <p className="font-semibold text-slate-900">
-                      {formatInr(receipt.rentAmount)}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Paid {formatDisplayDate(receipt.paymentDate)}
-                    </p>
+                    {receipt.amountDue != null &&
+                    receipt.amountPaid < receipt.amountDue ? (
+                      <>
+                        <p className="font-semibold text-slate-900">
+                          Paid {formatInr(receipt.amountPaid)}
+                        </p>
+                        <p className="mt-1 text-xs text-amber-800">
+                          Due {formatInr(receipt.amountDue)} · Balance{" "}
+                          {formatInr(receipt.amountDue - receipt.amountPaid)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatDisplayDate(receipt.paymentDate)} · Partial
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-slate-900">
+                          {formatInr(receipt.amountPaid)}
+                        </p>
+                        {receipt.amountDue != null &&
+                        receipt.amountDue > receipt.amountPaid ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Due {formatInr(receipt.amountDue)}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-slate-500">
+                          Paid {formatDisplayDate(receipt.paymentDate)}
+                        </p>
+                      </>
+                    )}
                   </div>
                 </Link>
               </li>

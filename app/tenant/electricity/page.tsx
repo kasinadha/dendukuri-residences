@@ -3,6 +3,7 @@ import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
 import { enrichElectricityReadingsWithPaymentStatus } from "@/lib/electricity-dues";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
+import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 export default async function TenantElectricityPage() {
@@ -11,9 +12,10 @@ export default async function TenantElectricityPage() {
   const readings = ctx?.flatId
     ? await listElectricityReadings(supabase, { flatId: ctx.flatId, limit: 40 })
     : [];
+  const duesClient = getTenantDuesSupabaseClient(supabase);
   const readingsWithStatus =
     ctx?.flatId && ctx.tenancyId
-      ? await enrichElectricityReadingsWithPaymentStatus(supabase, readings, {
+      ? await enrichElectricityReadingsWithPaymentStatus(duesClient, readings, {
           tenancyId: ctx.tenancyId,
           flatId: ctx.flatId,
         })
