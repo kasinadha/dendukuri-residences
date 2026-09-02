@@ -5,7 +5,7 @@ import { requireTenant } from "@/lib/auth";
 
 const nav = [
   { href: "/tenant", label: "Home" },
-  { href: "/tenant/pay", label: "Pay rent" },
+  { href: "/tenant/pay", label: "Pay dues" },
   { href: "/tenant/receipts", label: "Receipts" },
   { href: "/tenant/electricity", label: "Electricity" },
   { href: "/tenant/maintenance", label: "Maintenance" },

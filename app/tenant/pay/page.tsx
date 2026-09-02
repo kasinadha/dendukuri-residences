@@ -28,9 +28,9 @@ export default async function TenantPayPage() {
   if (!ctx?.tenancyId) {
     return (
       <div>
-        <p className="text-sm font-semibold text-emerald-700">PAY RENT</p>
+        <p className="text-sm font-semibold text-emerald-700">PAY DUES</p>
         <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-          Pay rent
+          Pay dues
         </h2>
         <p className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
           Your login is not linked to an active tenancy yet. Ask the owner to
@@ -42,15 +42,15 @@ export default async function TenantPayPage() {
 
   return (
     <div>
-      <p className="text-sm font-semibold text-emerald-700">PAY RENT</p>
+      <p className="text-sm font-semibold text-emerald-700">PAY DUES</p>
       <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-        Pay rent via UPI
+        Pay dues via UPI
       </h2>
       <p className="mt-2 max-w-2xl text-slate-500">
         Flat {ctx.flatNumber ?? "—"}
-        {ctx.monthlyRent != null ? ` · ${formatInr(ctx.monthlyRent)} / month` : ""}
-        . Pay to the UPI ID, then submit your UTR (and optional screenshot) for
-        confirmation.
+        {ctx.monthlyRent != null ? ` · ${formatInr(ctx.monthlyRent)} / month rent` : ""}
+        . Pay the outstanding amount (rent, charges, electricity, and any arrears)
+        to the UPI ID, then submit your UTR for confirmation.
       </p>
 
       <div className="mt-8">

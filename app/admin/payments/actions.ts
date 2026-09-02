@@ -25,7 +25,7 @@ import {
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
 import { voidPaymentRecord } from "@/lib/void-payment";
-import { getTenancyDuesBreakdown } from "@/lib/public-pay-dues";
+import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
 
 export type RecordPaymentResult =
   | {
@@ -94,7 +94,7 @@ export async function fetchTenancyDuesBreakdownAction(formData: FormData) {
     return { ok: false as const, error: "Billing month is invalid." };
   }
 
-  return getTenancyDuesBreakdown(supabase, {
+  return getTenancyDuesBreakdownWithArrears(supabase, {
     tenancyId,
     flatId,
     billingMonthKey: billingMonth,
@@ -159,7 +159,7 @@ export async function recordRentPayment(
     : computePaymentStatus(amountDue, amountPaid);
 
   const flat = unwrapFlat(tenancy.flats);
-  const breakdownResult = await getTenancyDuesBreakdown(supabase, {
+  const breakdownResult = await getTenancyDuesBreakdownWithArrears(supabase, {
     tenancyId,
     flatId: flat?.id ?? "",
     billingMonthKey: billingMonth,

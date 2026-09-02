@@ -58,7 +58,7 @@ export default function TenantRentPaymentForm({
       upiId,
       payeeName,
       amount: amountNum,
-      note: `Rent ${flatNumber} ${billingMonth}`,
+      note: `Dues ${flatNumber} ${billingMonth}`,
     });
   }, [upiId, payeeName, amountNum, flatNumber, billingMonth]);
 
@@ -78,11 +78,10 @@ export default function TenantRentPaymentForm({
       }
       setBreakdownError("");
       setBreakdown(result.breakdown);
-      setAmount(
-        result.breakdown.totalOutstanding > 0
-          ? String(result.breakdown.totalOutstanding)
-          : ""
-      );
+      const outstanding =
+        result.breakdown.grandTotalOutstanding ??
+        result.breakdown.totalOutstanding;
+      setAmount(outstanding > 0 ? String(outstanding) : "");
     });
     return () => {
       cancelled = true;
@@ -136,7 +135,8 @@ export default function TenantRentPaymentForm({
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h3 className="text-lg font-bold text-slate-900">Pay via UPI</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Pay the rent amount, then submit your UTR below for confirmation.
+          Pay rent, maintenance, washer, and electricity for the selected billing
+          month (including any arrears), then submit your UTR for confirmation.
         </p>
 
         {!upiId ? (

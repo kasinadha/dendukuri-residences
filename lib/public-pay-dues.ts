@@ -1,12 +1,112 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DuesBreakdown, DuesBreakdownLine } from "@/lib/dues-breakdown";
+import type {
+  ArrearsMonthBreakdown,
+  DuesBreakdown,
+  DuesBreakdownLine,
+} from "@/lib/dues-breakdown";
 import {
   allocatePaymentsAcrossLines,
   computeBreakdownTotals,
   parseDuesBreakdownFromNotes,
 } from "@/lib/dues-breakdown";
 import { getTenantMonthDue } from "@/lib/reminders";
+import { formatBillingMonthLabel } from "@/lib/receipts";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { MonthlyDuesLedgerRow } from "@/lib/monthly-dues";
+
+function priorBillingMonthKeys(upToMonthKey: string, count = 12): string[] {
+  const match = /^(\d{4})-(\d{2})$/.exec(upToMonthKey);
+  if (!match) return [];
+  let year = Number(match[1]);
+  let month = Number(match[2]);
+  const keys: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    month -= 1;
+    if (month < 1) {
+      month = 12;
+      year -= 1;
+    }
+    keys.push(`${year}-${String(month).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function buildLinesFromMonthDue(monthDue: MonthlyDuesLedgerRow): DuesBreakdownLine[] {
+  const lines: DuesBreakdownLine[] = [];
+
+  if (monthDue.rentDue > 0) {
+    lines.push({
+      key: "rent",
+      label: "Rent",
+      due: monthDue.rentDue,
+      paid: 0,
+      outstanding: monthDue.rentDue,
+    });
+  }
+  if (monthDue.maintenanceCharge > 0) {
+    lines.push({
+      key: "maintenance",
+      label: "Maintenance",
+      due: monthDue.maintenanceCharge,
+      paid: 0,
+      outstanding: monthDue.maintenanceCharge,
+    });
+  }
+  if (monthDue.carParkingCharge > 0) {
+    lines.push({
+      key: "parking",
+      label: "Car parking",
+      due: monthDue.carParkingCharge,
+      paid: 0,
+      outstanding: monthDue.carParkingCharge,
+    });
+  }
+  if (monthDue.washingMachineCharge > 0) {
+    lines.push({
+      key: "washer",
+      label: "Washing machine",
+      due: monthDue.washingMachineCharge,
+      paid: 0,
+      outstanding: monthDue.washingMachineCharge,
+    });
+  }
+  if (monthDue.otherMonthlyCharge > 0) {
+    lines.push({
+      key: "other",
+      label: monthDue.otherChargesNotes?.trim() || "Other monthly",
+      due: monthDue.otherMonthlyCharge,
+      paid: 0,
+      outstanding: monthDue.otherMonthlyCharge,
+    });
+  }
+  if (monthDue.electricityCharge > 0) {
+    lines.push({
+      key: "electricity",
+      label: "Electricity",
+      due: monthDue.electricityCharge,
+      paid: 0,
+      outstanding: monthDue.electricityCharge,
+    });
+  }
+
+  allocatePaymentsAcrossLines(lines, monthDue.amountPaid);
+  return lines;
+}
+
+function buildBreakdownFromMonthDue(
+  monthDue: MonthlyDuesLedgerRow,
+  billingMonthKey: string
+): DuesBreakdown {
+  const lines = buildLinesFromMonthDue(monthDue);
+  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
+  return {
+    billingMonthKey,
+    lines,
+    totalDue,
+    totalPaid,
+    totalOutstanding,
+  };
+}
 
 export async function verifyPublicPayTenantPhone(
   supabase: SupabaseClient,
@@ -68,80 +168,62 @@ export async function getTenancyDuesBreakdown(
     return { ok: false, error: "No tenancy dues found for this period." };
   }
 
-  const lines: DuesBreakdownLine[] = [];
+  return {
+    ok: true,
+    breakdown: buildBreakdownFromMonthDue(monthDue, input.billingMonthKey),
+  };
+}
 
-  if (monthDue.rentDue > 0) {
-    lines.push({
-      key: "rent",
-      label: "Rent",
-      due: monthDue.rentDue,
-      paid: 0,
-      outstanding: monthDue.rentDue,
+/** Current month breakdown plus outstanding from prior months (up to 12). */
+export async function getTenancyDuesBreakdownWithArrears(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    flatId: string;
+    billingMonthKey: string;
+  }
+): Promise<{ ok: true; breakdown: DuesBreakdown } | { ok: false; error: string }> {
+  const current = await getTenancyDuesBreakdown(supabase, input);
+  if (!current.ok) return current;
+
+  const arrears: ArrearsMonthBreakdown[] = [];
+  for (const monthKey of priorBillingMonthKeys(input.billingMonthKey)) {
+    const monthDue = await getTenantMonthDue(
+      supabase,
+      input.tenancyId,
+      monthKey
+    );
+    if (!monthDue || monthDue.outstanding <= 0) continue;
+
+    const lines = buildLinesFromMonthDue(monthDue).filter(
+      (line) => line.outstanding > 0
+    );
+    if (lines.length === 0) continue;
+
+    arrears.push({
+      billingMonthKey: monthKey,
+      billingMonthLabel: formatBillingMonthLabel(monthKey),
+      lines: lines.map((line) => ({
+        ...line,
+        isArrears: true,
+        arrearsMonthKey: monthKey,
+        label: `${line.label} (${formatBillingMonthLabel(monthKey)})`,
+      })),
+      totalOutstanding: lines.reduce((sum, line) => sum + line.outstanding, 0),
     });
   }
 
-  if (monthDue.maintenanceCharge > 0) {
-    lines.push({
-      key: "maintenance",
-      label: "Maintenance",
-      due: monthDue.maintenanceCharge,
-      paid: 0,
-      outstanding: monthDue.maintenanceCharge,
-    });
-  }
-
-  if (monthDue.carParkingCharge > 0) {
-    lines.push({
-      key: "parking",
-      label: "Car parking",
-      due: monthDue.carParkingCharge,
-      paid: 0,
-      outstanding: monthDue.carParkingCharge,
-    });
-  }
-
-  if (monthDue.washingMachineCharge > 0) {
-    lines.push({
-      key: "washer",
-      label: "Washing machine",
-      due: monthDue.washingMachineCharge,
-      paid: 0,
-      outstanding: monthDue.washingMachineCharge,
-    });
-  }
-
-  if (monthDue.otherMonthlyCharge > 0) {
-    lines.push({
-      key: "other",
-      label: monthDue.otherChargesNotes?.trim() || "Other monthly",
-      due: monthDue.otherMonthlyCharge,
-      paid: 0,
-      outstanding: monthDue.otherMonthlyCharge,
-    });
-  }
-
-  if (monthDue.electricityCharge > 0) {
-    lines.push({
-      key: "electricity",
-      label: "Electricity",
-      due: monthDue.electricityCharge,
-      paid: 0,
-      outstanding: monthDue.electricityCharge,
-    });
-  }
-
-  allocatePaymentsAcrossLines(lines, monthDue.amountPaid);
-
-  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
+  const arrearsTotal = arrears.reduce(
+    (sum, month) => sum + month.totalOutstanding,
+    0
+  );
 
   return {
     ok: true,
     breakdown: {
-      billingMonthKey: input.billingMonthKey,
-      lines,
-      totalDue,
-      totalPaid,
-      totalOutstanding,
+      ...current.breakdown,
+      arrears,
+      grandTotalOutstanding: current.breakdown.totalOutstanding + arrearsTotal,
     },
   };
 }
@@ -153,7 +235,7 @@ export async function getPublicPayDuesBreakdown(input: {
 }): Promise<{ ok: true; breakdown: DuesBreakdown } | { ok: false; error: string }> {
   const admin = createAdminClient();
   if (!admin.ok) return { ok: false, error: admin.error };
-  return getTenancyDuesBreakdown(admin.client, input);
+  return getTenancyDuesBreakdownWithArrears(admin.client, input);
 }
 
 /** Recompute breakdown from ledger + bills; fall back to stored notes if needed. */
