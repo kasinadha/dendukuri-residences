@@ -131,6 +131,69 @@ export type DuesBreakdown = {
   infoMessage?: string;
 };
 
+export type DuesCategoryBreakdown = {
+  rent: number;
+  electricity: number;
+  other: number;
+};
+
+/** Reset paid fields so payments can be re-applied in waterfall order. */
+export function resetBreakdownForAllocation(
+  breakdown: DuesBreakdown
+): DuesBreakdown {
+  const resetLine = (line: DuesBreakdownLine): DuesBreakdownLine => {
+    const owed = Math.max(0, line.outstanding + line.paid);
+    return {
+      ...line,
+      paid: 0,
+      outstanding: owed,
+      due: Math.max(line.due, owed),
+    };
+  };
+
+  const arrears = breakdown.arrears?.map((month) => {
+    const lines = month.lines.map(resetLine);
+    return {
+      ...month,
+      lines,
+      totalOutstanding: lines.reduce((sum, line) => sum + line.outstanding, 0),
+    };
+  });
+
+  const lines = breakdown.lines.map(resetLine);
+  const totals = computeBreakdownTotals(lines);
+  const arrearsTotal =
+    arrears?.reduce((sum, month) => sum + month.totalOutstanding, 0) ?? 0;
+
+  return {
+    ...breakdown,
+    lines,
+    arrears,
+    totalDue: totals.totalDue,
+    totalPaid: 0,
+    totalOutstanding: totals.totalOutstanding + arrearsTotal,
+    grandTotalOutstanding: totals.totalOutstanding + arrearsTotal,
+    priorMonthArrearsTotal:
+      arrearsTotal > 0 ? arrearsTotal : breakdown.priorMonthArrearsTotal,
+  };
+}
+
+/** Sum paid amounts by rent / electricity / other (maintenance, parking, etc.). */
+export function categoryTotalsFromBreakdown(
+  breakdown: DuesBreakdown
+): DuesCategoryBreakdown {
+  const combined = toCombinedBreakdownView(breakdown);
+  const totals: DuesCategoryBreakdown = { rent: 0, electricity: 0, other: 0 };
+  for (const line of combined.lines) {
+    const paid = line.paid;
+    if (paid <= 0) continue;
+    if (line.key === "rent") totals.rent += paid;
+    else if (line.key === "electricity") totals.electricity += paid;
+    else totals.other += paid;
+  }
+  return totals;
+}
+
 export const DUES_BREAKDOWN_PREFIX = "dues_breakdown:";
 
 export function encodeDuesBreakdownNote(breakdown: DuesBreakdown): string {
