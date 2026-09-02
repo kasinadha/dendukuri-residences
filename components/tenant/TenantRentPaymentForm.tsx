@@ -23,6 +23,7 @@ type Props = {
   flatNumber: string;
   monthlyRent: number | null;
   defaultBillingMonth: string;
+  initialOutstanding?: number;
   upiId: string | null;
   upiQrUrl?: string | null;
   payeeName: string;
@@ -33,6 +34,7 @@ export default function TenantRentPaymentForm({
   flatNumber,
   monthlyRent,
   defaultBillingMonth,
+  initialOutstanding,
   upiId,
   upiQrUrl,
   payeeName,
@@ -41,9 +43,12 @@ export default function TenantRentPaymentForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [amount, setAmount] = useState(
-    monthlyRent != null ? String(monthlyRent) : ""
-  );
+  const [amount, setAmount] = useState(() => {
+    if (initialOutstanding != null && initialOutstanding > 0) {
+      return String(initialOutstanding);
+    }
+    return monthlyRent != null ? String(monthlyRent) : "";
+  });
   const [billingMonth, setBillingMonth] = useState(defaultBillingMonth);
   const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
   const [breakdownError, setBreakdownError] = useState("");
