@@ -8,17 +8,13 @@ import type { BuildingDepositRow } from "@/lib/deposits";
 import { loadDepositSummary } from "@/lib/deposits";
 import {
   parseDuesBreakdownFromNotes,
-  type DuesBreakdown,
+  type DuesCategoryBreakdown,
 } from "@/lib/dues-breakdown";
+import { computeCollectedCategoryBreakdownForTenancy } from "@/lib/public-pay-dues";
 import { parseBillingMonthFromNotes } from "@/lib/receipts";
 
 export type { BuildingDepositRow } from "@/lib/deposits";
-
-export type DuesCategoryBreakdown = {
-  rent: number;
-  electricity: number;
-  other: number;
-};
+export type { DuesCategoryBreakdown } from "@/lib/dues-breakdown";
 
 const EMPTY_DUES_BREAKDOWN: DuesCategoryBreakdown = {
   rent: 0,
@@ -133,44 +129,6 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-function categoryTotalsFromBreakdown(
-  breakdown: DuesBreakdown
-): DuesCategoryBreakdown {
-  const totals: DuesCategoryBreakdown = { rent: 0, electricity: 0, other: 0 };
-  const allLines = [
-    ...breakdown.lines,
-    ...(breakdown.arrears?.flatMap((month) => month.lines) ?? []),
-  ];
-  for (const line of allLines) {
-    const paid = num(line.paid);
-    if (paid <= 0) continue;
-    if (line.key === "rent") totals.rent += paid;
-    else if (line.key === "electricity") totals.electricity += paid;
-    else totals.other += paid;
-  }
-  return totals;
-}
-
-function diffDuesBreakdown(
-  current: DuesCategoryBreakdown,
-  previous: DuesCategoryBreakdown
-): DuesCategoryBreakdown {
-  return {
-    rent: Math.max(0, current.rent - previous.rent),
-    electricity: Math.max(0, current.electricity - previous.electricity),
-    other: Math.max(0, current.other - previous.other),
-  };
-}
-
-function addDuesBreakdown(
-  target: DuesCategoryBreakdown,
-  delta: DuesCategoryBreakdown
-): void {
-  target.rent += delta.rent;
-  target.electricity += delta.electricity;
-  target.other += delta.other;
-}
-
 function fallbackDuesCategoryForPayment(
   paymentType: string | null | undefined,
   amount: number
@@ -182,6 +140,15 @@ function fallbackDuesCategoryForPayment(
   return { rent: amount, electricity: 0, other: 0 };
 }
 
+function addDuesBreakdown(
+  target: DuesCategoryBreakdown,
+  delta: DuesCategoryBreakdown
+): void {
+  target.rent += delta.rent;
+  target.electricity += delta.electricity;
+  target.other += delta.other;
+}
+
 type TenancyDuesPayment = {
   amount: number;
   paymentType: string | null;
@@ -189,32 +156,34 @@ type TenancyDuesPayment = {
   paymentDate: string;
 };
 
-function incrementalDuesBreakdownForTenancy(
+function incrementalDuesBreakdownFromNotes(
   payments: TenancyDuesPayment[]
 ): DuesCategoryBreakdown {
-  const sorted = [...payments].sort((a, b) =>
-    a.paymentDate.localeCompare(b.paymentDate)
-  );
   const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_BREAKDOWN };
-  let previous = { ...EMPTY_DUES_BREAKDOWN };
-
-  for (const payment of sorted) {
+  for (const payment of payments) {
     const breakdown = parseDuesBreakdownFromNotes(payment.notes);
     if (breakdown) {
-      const current = categoryTotalsFromBreakdown(breakdown);
-      addDuesBreakdown(totals, diffDuesBreakdown(current, previous));
-      previous = current;
+      const rent = breakdown.lines
+        .filter((line) => line.key === "rent")
+        .reduce((sum, line) => sum + num(line.paid), 0);
+      const electricity = breakdown.lines
+        .filter((line) => line.key === "electricity")
+        .reduce((sum, line) => sum + num(line.paid), 0);
+      const other = breakdown.lines
+        .filter(
+          (line) => line.key !== "rent" && line.key !== "electricity"
+        )
+        .reduce((sum, line) => sum + num(line.paid), 0);
+      totals.rent += rent;
+      totals.electricity += electricity;
+      totals.other += other;
       continue;
     }
-
-    const incremental = fallbackDuesCategoryForPayment(
-      payment.paymentType,
-      payment.amount
+    addDuesBreakdown(
+      totals,
+      fallbackDuesCategoryForPayment(payment.paymentType, payment.amount)
     );
-    addDuesBreakdown(totals, incremental);
-    addDuesBreakdown(previous, incremental);
   }
-
   return totals;
 }
 
@@ -263,7 +232,7 @@ export async function getBuildingRevenueReport(
           notes,
           receiver_account_id,
           tenancies (
-            flats ( flat_number, payment_account_id )
+            flats ( id, flat_number, payment_account_id )
           ),
           payment_accounts ( label )
         `
@@ -312,7 +281,7 @@ export async function getBuildingRevenueReport(
   const buildingDuesBreakdown = new Map<BuildingWing, DuesCategoryBreakdown>();
   const tenancyDuesPayments = new Map<
     string,
-    { wing: BuildingWing; payments: TenancyDuesPayment[] }
+    { wing: BuildingWing; flatId: string; payments: TenancyDuesPayment[] }
   >();
   const accountTotals = new Map<
     string | null,
@@ -353,10 +322,13 @@ export async function getBuildingRevenueReport(
       });
 
       if (bucket === "dues" && tenancyId) {
+        const flatId = String(flat?.id ?? "");
         const group = tenancyDuesPayments.get(tenancyId) ?? {
           wing,
+          flatId,
           payments: [],
         };
+        if (flatId && !group.flatId) group.flatId = flatId;
         group.payments.push({
           amount,
           paymentType: (row.payment_type as string | null) ?? null,
@@ -389,13 +361,24 @@ export async function getBuildingRevenueReport(
     });
   }
 
-  for (const { wing, payments } of tenancyDuesPayments.values()) {
-    const breakdown = incrementalDuesBreakdownForTenancy(payments);
-    const wingTotals = buildingDuesBreakdown.get(wing) ?? {
+  for (const [tenancyId, group] of tenancyDuesPayments) {
+    const breakdown =
+      billingMonth && group.flatId
+        ? await computeCollectedCategoryBreakdownForTenancy(supabase, {
+            tenancyId,
+            flatId: group.flatId,
+            billingMonthKey: billingMonth,
+            payments: group.payments.map((payment) => ({
+              amount: payment.amount,
+              paymentDate: payment.paymentDate,
+            })),
+          })
+        : incrementalDuesBreakdownFromNotes(group.payments);
+    const wingTotals = buildingDuesBreakdown.get(group.wing) ?? {
       ...EMPTY_DUES_BREAKDOWN,
     };
     addDuesBreakdown(wingTotals, breakdown);
-    buildingDuesBreakdown.set(wing, wingTotals);
+    buildingDuesBreakdown.set(group.wing, wingTotals);
     addDuesBreakdown(totalDuesBreakdown, breakdown);
   }
 
