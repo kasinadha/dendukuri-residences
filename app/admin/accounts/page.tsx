@@ -33,8 +33,8 @@ export default async function AccountsPage({ searchParams }: Props) {
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
           Link each receive QR or UPI ID to Joint, Kasi, Kanthu, or Pratyu.
-          See building C/D collections, expenses, and net below — tag who paid
-          on water, maintenance, and other expenses for accurate splits.
+          Deposits are tracked separately from monthly dues. See deposit
+          balances by building on top, then dues income and expenses below.
         </p>
         <form method="get" className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block">

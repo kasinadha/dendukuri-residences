@@ -25,6 +25,8 @@ export type TenancyOption = {
   flatNumber: string;
   tenantName: string;
   monthlyRent: number | null;
+  depositAmount: number | null;
+  depositPaid: number | null;
   suggestedReceiverAccountId?: string | null;
 };
 
@@ -89,6 +91,9 @@ export default function RecordPaymentForm({
   const [billingMonth, setBillingMonth] = useState(
     defaultBillingMonth ?? currentYearMonth()
   );
+  const [paymentCategory, setPaymentCategory] = useState<"dues" | "deposit">(
+    "dues"
+  );
   const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
   const [breakdownError, setBreakdownError] = useState("");
 
@@ -125,7 +130,26 @@ export default function RecordPaymentForm({
   }, [breakdown]);
 
   useEffect(() => {
-    if (!tenancyId || !selected?.flatId || !billingMonth) return;
+    if (
+      paymentCategory !== "dues" ||
+      !tenancyId ||
+      !selected?.flatId ||
+      !billingMonth
+    ) {
+      if (paymentCategory === "deposit") {
+        setBreakdown(null);
+        setBreakdownError("");
+        const outstanding =
+          selected?.depositAmount != null && selected.depositPaid != null
+            ? Math.max(0, selected.depositAmount - selected.depositPaid)
+            : null;
+        const value =
+          outstanding != null && outstanding > 0 ? String(outstanding) : "";
+        setAmountDue(value);
+        setAmountPaid(value);
+      }
+      return;
+    }
     const formData = new FormData();
     formData.set("tenancy_id", tenancyId);
     formData.set("flat_id", selected.flatId);
@@ -147,7 +171,7 @@ export default function RecordPaymentForm({
     return () => {
       cancelled = true;
     };
-  }, [tenancyId, selected?.flatId, billingMonth]);
+  }, [tenancyId, selected?.flatId, selected?.depositAmount, selected?.depositPaid, billingMonth, paymentCategory]);
 
   function onTenancyChange(id: string) {
     setTenancyId(id);
@@ -236,6 +260,39 @@ export default function RecordPaymentForm({
             </span>
           </p>
         </div>
+
+        <label className="block sm:col-span-2">
+          <span className="mb-2 block text-sm font-semibold text-slate-700">
+            Payment for
+          </span>
+          <select
+            name="payment_category"
+            value={paymentCategory}
+            onChange={(e) =>
+              setPaymentCategory(
+                e.target.value === "deposit" ? "deposit" : "dues"
+              )
+            }
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+          >
+            <option value="dues">Monthly dues (rent, charges, electricity)</option>
+            <option value="deposit">Deposit / advance</option>
+          </select>
+        </label>
+
+        {paymentCategory === "deposit" ? (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950 sm:col-span-2">
+            Deposit is tracked separately from monthly rent. Agreed{" "}
+            {selected?.depositAmount != null
+              ? formatInr(selected.depositAmount)
+              : "—"}
+            , paid{" "}
+            {selected?.depositPaid != null
+              ? formatInr(selected.depositPaid)
+              : "—"}
+            .
+          </div>
+        ) : null}
 
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
@@ -368,7 +425,7 @@ export default function RecordPaymentForm({
         </p>
       ) : null}
 
-      {previewBreakdown ? (
+      {previewBreakdown && paymentCategory === "dues" ? (
         <div className="mt-6">
           <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
           <div className="mt-3">

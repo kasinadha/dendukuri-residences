@@ -26,6 +26,7 @@ import {
 } from "@/lib/receipts";
 import { voidPaymentRecord } from "@/lib/void-payment";
 import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
+import { incrementTenancyDepositPaid } from "@/lib/tenants";
 
 export type RecordPaymentResult =
   | {
@@ -58,6 +59,8 @@ export async function approvePaymentSubmissionAction(formData: FormData) {
     revalidatePath("/admin/receipts");
     revalidatePath("/admin");
     revalidatePath("/admin/reports");
+    revalidatePath("/admin/accounts");
+    revalidatePath("/admin/tenants");
     revalidatePath("/tenant/receipts");
     revalidatePath("/tenant/pay");
     revalidatePath("/tenant");
@@ -115,6 +118,8 @@ export async function recordRentPayment(
   const transactionReference = asString(formData, "transaction_reference");
   const notes = asString(formData, "notes");
   const waived = asString(formData, "waived") === "1";
+  const paymentCategory = asString(formData, "payment_category") || "dues";
+  const isDeposit = paymentCategory === "deposit";
   const explicitReceiverAccountId =
     asString(formData, "receiver_account_id") || null;
 
@@ -159,20 +164,24 @@ export async function recordRentPayment(
     : computePaymentStatus(amountDue, amountPaid);
 
   const flat = unwrapFlat(tenancy.flats);
-  const breakdownResult = await getTenancyDuesBreakdownWithArrears(supabase, {
-    tenancyId,
-    flatId: flat?.id ?? "",
-    billingMonthKey: billingMonth,
-  });
   const duesBreakdown =
-    breakdownResult.ok && !waived
-      ? applyAdditionalPaymentToBreakdown(
-          breakdownResult.breakdown,
-          amountPaid
-        )
-      : breakdownResult.ok
-        ? breakdownResult.breakdown
-        : null;
+    !isDeposit && !waived
+      ? await (async () => {
+          const breakdownResult = await getTenancyDuesBreakdownWithArrears(
+            supabase,
+            {
+              tenancyId,
+              flatId: flat?.id ?? "",
+              billingMonthKey: billingMonth,
+            }
+          );
+          if (!breakdownResult.ok) return null;
+          return applyAdditionalPaymentToBreakdown(
+            breakdownResult.breakdown,
+            amountPaid
+          );
+        })()
+      : null;
 
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId: explicitReceiverAccountId,
@@ -188,13 +197,19 @@ export async function recordRentPayment(
     amount_paid: waived ? 0 : amountPaid,
     amount_due: amountDue,
     payment_mode: paymentMode,
-    payment_type: "rent",
+    payment_type: isDeposit ? "advance" : "rent",
     transaction_reference: transactionReference || null,
     status,
-    notes: appendDuesBreakdownToNotes(
-      encodeBillingMonthNote(billingMonth, notes || undefined),
-      duesBreakdown
-    ),
+    notes: isDeposit
+      ? encodeBillingMonthNote(
+          billingMonth,
+          [notes || null, "Deposit / advance payment"].filter(Boolean).join("\n") ||
+            undefined
+        )
+      : appendDuesBreakdownToNotes(
+          encodeBillingMonthNote(billingMonth, notes || undefined),
+          duesBreakdown
+        ),
   };
 
   if (receiverAccountId) {
@@ -206,6 +221,18 @@ export async function recordRentPayment(
     return { ok: false, error: paymentResult.error };
   }
   const paymentId = paymentResult.paymentId;
+
+  if (isDeposit && !waived) {
+    const depositUpdate = await incrementTenancyDepositPaid(supabase, {
+      tenancyId,
+      amount: amountPaid,
+      paymentDate,
+    });
+    if (!depositUpdate.ok) {
+      await supabase.from("payments").delete().eq("id", paymentId);
+      return { ok: false, error: depositUpdate.error };
+    }
+  }
 
   // Receipt only when money was collected (or waived acknowledgement)
   if (!waived && amountPaid <= 0) {
@@ -226,6 +253,8 @@ export async function recordRentPayment(
     revalidatePath("/admin/receipts");
     revalidatePath("/admin");
     revalidatePath("/admin/reports");
+    revalidatePath("/admin/accounts");
+    revalidatePath("/admin/tenants");
     revalidatePath("/tenant/receipts");
 
     return {

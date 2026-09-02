@@ -633,3 +633,41 @@ function mapTenantRows(
     };
   });
 }
+
+export async function incrementTenancyDepositPaid(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    amount: number;
+    paymentDate: string;
+  }
+): Promise<{ ok: true; depositPaid: number } | { ok: false; error: string }> {
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return { ok: false, error: "Invalid deposit amount." };
+  }
+
+  const { data, error } = await supabase
+    .from("tenancies")
+    .select("deposit_paid")
+    .eq("id", input.tenancyId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, error: error?.message || "Tenancy not found." };
+  }
+
+  const nextPaid = (num(data.deposit_paid) ?? 0) + input.amount;
+  const { error: updateError } = await supabase
+    .from("tenancies")
+    .update({
+      deposit_paid: nextPaid,
+      deposit_paid_date: input.paymentDate,
+    })
+    .eq("id", input.tenancyId);
+
+  if (updateError) {
+    return { ok: false, error: updateError.message };
+  }
+
+  return { ok: true, depositPaid: nextPaid };
+}

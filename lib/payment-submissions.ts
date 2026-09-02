@@ -13,6 +13,7 @@ import {
   encodeBillingMonthNote,
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
+import { incrementTenancyDepositPaid } from "@/lib/tenants";
 
 export type PaymentSubmission = {
   id: string;
@@ -618,6 +619,21 @@ export async function approvePaymentSubmission(
 
   try {
     const receipt = await insertReceiptWithUniqueNumber(supabase, paymentId);
+
+    if (purpose === "advance" && tenancyId) {
+      const depositUpdate = await incrementTenancyDepositPaid(supabase, {
+        tenancyId,
+        amount: approvedAmount,
+        paymentDate: String(submission.payment_date),
+      });
+      if (!depositUpdate.ok) {
+        await supabase.from("payments").delete().eq("id", paymentId);
+        return {
+          ok: false,
+          error: `Receipt ${receipt.receipt_number} was created but deposit update failed: ${depositUpdate.error}`,
+        };
+      }
+    }
 
     const updatePayload: Record<string, unknown> = {
       status: "approved",
