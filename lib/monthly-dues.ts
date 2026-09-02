@@ -52,6 +52,7 @@ export type MonthlyDuesLedgerRow = {
   flatNumber: string;
   tenantName: string;
   billingMonthKey: string;
+  startDate: string | null;
   rentDue: number;
   maintenanceCharge: number;
   carParkingCharge: number;
@@ -439,6 +440,7 @@ export async function getMonthlyDuesSummary(
       flatNumber: flat?.flat_number?.trim() || "—",
       tenantName: tenant?.full_name?.trim() || "—",
       billingMonthKey: monthKey,
+      startDate: tenancyDates.start_date ?? null,
       rentDue,
       maintenanceCharge,
       carParkingCharge,
@@ -503,4 +505,184 @@ export function formatMonthlyDuesBreakdown(row: MonthlyDuesLedgerRow): string {
     parts.push(`electricity ${row.electricityCharge}`);
   }
   return parts.length ? parts.join(" + ") : "no monthly charges";
+}
+
+async function loadTenancyRowById(supabase: SupabaseClient, tenancyId: string) {
+  const full = await supabase
+    .from("tenancies")
+    .select(TENANCY_SELECT_FULL)
+    .eq("id", tenancyId)
+    .maybeSingle();
+  if (!full.error && full.data) return full.data;
+
+  if (
+    full.error &&
+    /maintenance_charge|car_parking_charge|washing_machine_charge|other_monthly_charge/i.test(
+      full.error.message
+    )
+  ) {
+    const fallback = await supabase
+      .from("tenancies")
+      .select(TENANCY_SELECT_FALLBACK)
+      .eq("id", tenancyId)
+      .maybeSingle();
+    return fallback.data ?? null;
+  }
+
+  return null;
+}
+
+/** Single-tenancy dues row, including move-in months with zero due. */
+export async function getTenancyMonthlyDueRow(
+  supabase: SupabaseClient,
+  tenancyId: string,
+  billingMonthKey: string
+): Promise<MonthlyDuesLedgerRow | null> {
+  const monthKey = billingMonthKey.trim();
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return null;
+
+  const row = await loadTenancyRowById(supabase, tenancyId);
+  if (!row) return null;
+
+  const tenancyDates = {
+    start_date: (row as { start_date?: string | null }).start_date ?? null,
+    end_date: (row as { end_date?: string | null }).end_date ?? null,
+    status: row.status,
+  };
+  if (!tenancyIncludedInMonthlyLedger(tenancyDates, monthKey)) return null;
+
+  const nowKey = currentMonthKey();
+  const electricityByFlatId = await loadElectricityDueByFlatId(supabase, monthKey);
+  const flat = unwrapOne(row.flats);
+  const tenant = unwrapOne(row.tenants);
+
+  const { data: paymentRows } = await supabase
+    .from("payments")
+    .select(
+      `
+      id,
+      tenancy_id,
+      amount_paid,
+      status,
+      payment_date,
+      payment_type,
+      notes,
+      receipts ( id, receipt_number )
+    `
+    )
+    .eq("tenancy_id", tenancyId)
+    .in("payment_type", ["rent", "maintenance"]);
+
+  let rentPaid = 0;
+  let chargesPaid = 0;
+  let lastPaymentId: string | null = null;
+  let lastPaymentDate: string | null = null;
+  let lastReceiptId: string | null = null;
+  let lastReceiptNumber: string | null = null;
+  let waived = false;
+
+  for (const payment of paymentRows ?? []) {
+    const { billingMonthKey: key } = parseBillingMonthFromNotes(payment.notes);
+    const effectiveKey =
+      key ??
+      (typeof payment.payment_date === "string"
+        ? payment.payment_date.slice(0, 7)
+        : null);
+    if (effectiveKey !== monthKey) continue;
+
+    const paid = num(payment.amount_paid);
+    const type = String(payment.payment_type ?? "rent").toLowerCase();
+    if (type === "maintenance") chargesPaid += paid;
+    else rentPaid += paid;
+
+    if ((payment.status ?? "").toLowerCase() === "waived") waived = true;
+
+    const receipt = unwrapOne(
+      payment.receipts as
+        | { id: string; receipt_number: string }
+        | { id: string; receipt_number: string }[]
+        | null
+    );
+    const paymentDate = String(payment.payment_date ?? "");
+    if (!lastPaymentDate || paymentDate >= lastPaymentDate) {
+      lastPaymentId = payment.id;
+      lastPaymentDate = paymentDate;
+      lastReceiptId = receipt?.id ?? null;
+      lastReceiptNumber = receipt?.receipt_number ?? null;
+    }
+  }
+
+  const owesDues = tenancyOwesMonthlyDues(tenancyDates, monthKey);
+  const charges = buildTenantMonthlyCharges({
+    maintenanceCharge: numOrNull(
+      (row as { maintenance_charge?: unknown }).maintenance_charge
+    ),
+    carParkingCharge: numOrNull(
+      (row as { car_parking_charge?: unknown }).car_parking_charge
+    ),
+    washingMachineCharge: numOrNull(
+      (row as { washing_machine_charge?: unknown }).washing_machine_charge
+    ),
+    otherMonthlyCharge: numOrNull(
+      (row as { other_monthly_charge?: unknown }).other_monthly_charge
+    ),
+    otherChargesNotes:
+      ((row as { other_charges_notes?: string | null }).other_charges_notes ??
+        null),
+    flatMaintenanceFallback: numOrNull(flat?.maintenance_amount),
+  });
+
+  const rentDue = owesDues ? num(row.monthly_rent) : 0;
+  const maintenanceCharge = owesDues ? charges.maintenanceCharge : 0;
+  const carParkingCharge = owesDues ? charges.carParkingCharge : 0;
+  const washingMachineCharge = owesDues ? charges.washingMachineCharge : 0;
+  const otherMonthlyCharge = owesDues ? charges.otherMonthlyCharge : 0;
+  const chargesDue = owesDues ? charges.totalMonthlyCharges : 0;
+  const electricityRaw = electricityByFlatId.get(flat?.id ?? "") ?? 0;
+  const electricityCharge = owesDues ? electricityRaw : 0;
+  const lines = buildMonthlyDuesLines({
+    rentDue,
+    maintenanceCharge,
+    carParkingCharge,
+    washingMachineCharge,
+    otherMonthlyCharge,
+    otherChargesNotes: charges.otherChargesNotes,
+    electricityCharge,
+  });
+  const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
+  const amountPaid = rentPaid + chargesPaid;
+
+  allocatePaymentsAcrossLines(lines, amountPaid);
+  const outstanding = lines.reduce((sum, line) => sum + line.outstanding, 0);
+
+  let status: PaymentStatus = waived
+    ? "waived"
+    : computePaymentStatus(totalDue, amountPaid);
+  status = applyOverdueIfNeeded(status, monthKey, nowKey);
+
+  return {
+    tenancyId: row.id,
+    flatNumber: flat?.flat_number?.trim() || "—",
+    tenantName: tenant?.full_name?.trim() || "—",
+    billingMonthKey: monthKey,
+    startDate: tenancyDates.start_date ?? null,
+    rentDue,
+    maintenanceCharge,
+    carParkingCharge,
+    washingMachineCharge,
+    otherMonthlyCharge,
+    otherChargesNotes: charges.otherChargesNotes,
+    chargesDue,
+    electricityCharge,
+    totalDue,
+    rentPaid,
+    chargesPaid,
+    amountPaid,
+    outstanding: status === "waived" ? 0 : outstanding,
+    status,
+    lastPaymentId,
+    lastReceiptId,
+    lastReceiptNumber,
+    lastPaymentDate,
+  };
 }

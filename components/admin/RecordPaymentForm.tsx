@@ -11,6 +11,8 @@ import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import { computePaymentStatus } from "@/lib/payment-status";
 import {
   applyAdditionalPaymentToBreakdown,
+  breakdownPaymentAmountDefaults,
+  toOutstandingOnlyBreakdown,
   type DuesBreakdown,
 } from "@/lib/dues-breakdown";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
@@ -54,16 +56,8 @@ function todayIsoDate(): string {
   }).format(new Date());
 }
 
-function paymentAmountDefaults(breakdown: DuesBreakdown): {
-  amountDue: string;
-  amountPaid: string;
-} {
-  const outstanding =
-    breakdown.grandTotalOutstanding ?? breakdown.totalOutstanding;
-  return {
-    amountDue: String(breakdown.totalDue),
-    amountPaid: outstanding > 0 ? String(outstanding) : "",
-  };
+function paymentAmountDefaults(breakdown: DuesBreakdown) {
+  return breakdownPaymentAmountDefaults(breakdown);
 }
 
 type Props = {
@@ -90,12 +84,8 @@ export default function RecordPaymentForm({
     initialTenancy?.suggestedReceiverAccountId ?? ""
   );
   const selected = tenancies.find((t) => t.id === tenancyId) ?? tenancies[0];
-  const [amountDue, setAmountDue] = useState(
-    selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
-  );
-  const [amountPaid, setAmountPaid] = useState(
-    selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
-  );
+  const [amountDue, setAmountDue] = useState("");
+  const [amountPaid, setAmountPaid] = useState("");
   const [billingMonth, setBillingMonth] = useState(
     defaultBillingMonth ?? currentYearMonth()
   );
@@ -110,8 +100,12 @@ export default function RecordPaymentForm({
       : null;
   const previewBreakdown = useMemo(() => {
     if (!breakdown) return null;
-    if (!Number.isFinite(paidNum) || paidNum <= 0) return breakdown;
-    return applyAdditionalPaymentToBreakdown(breakdown, paidNum);
+    if (!Number.isFinite(paidNum) || paidNum <= 0) {
+      return toOutstandingOnlyBreakdown(breakdown);
+    }
+    return toOutstandingOnlyBreakdown(
+      applyAdditionalPaymentToBreakdown(breakdown, paidNum)
+    );
   }, [breakdown, paidNum]);
   const electricityOnlyHint = useMemo(() => {
     if (!breakdown) return null;
@@ -158,10 +152,10 @@ export default function RecordPaymentForm({
     setTenancyId(id);
     const next = tenancies.find((t) => t.id === id);
     setReceiverAccountId(next?.suggestedReceiverAccountId ?? "");
-    if (next?.monthlyRent != null) {
-      setAmountDue(String(next.monthlyRent));
-      setAmountPaid(String(next.monthlyRent));
-    }
+    setAmountDue("");
+    setAmountPaid("");
+    setBreakdown(null);
+    setBreakdownError("");
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -364,6 +358,12 @@ export default function RecordPaymentForm({
       {electricityOnlyHint ? (
         <p className="mt-6 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
           {electricityOnlyHint}
+        </p>
+      ) : null}
+
+      {breakdown?.infoMessage ? (
+        <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {breakdown.infoMessage}
         </p>
       ) : null}
 

@@ -117,6 +117,8 @@ export type DuesBreakdown = {
   arrears?: ArrearsMonthBreakdown[];
   /** Current month outstanding + all arrears */
   grandTotalOutstanding?: number;
+  /** e.g. move-in month — no dues yet */
+  infoMessage?: string;
 };
 
 export const DUES_BREAKDOWN_PREFIX = "dues_breakdown:";
@@ -158,4 +160,45 @@ export function parseRupeeAmountInput(raw: string): number | null {
   if (!cleaned) return null;
   const n = Number(cleaned);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+/** Sum still owed across the selected month and any arrears. */
+export function breakdownGrandOutstanding(breakdown: DuesBreakdown): number {
+  return breakdown.grandTotalOutstanding ?? breakdown.totalOutstanding;
+}
+
+/** Defaults for pay / record forms — only what is still owed. */
+export function breakdownPaymentAmountDefaults(breakdown: DuesBreakdown): {
+  amountDue: string;
+  amountPaid: string;
+} {
+  const outstanding = breakdownGrandOutstanding(breakdown);
+  const value = outstanding > 0 ? String(outstanding) : "";
+  return { amountDue: value, amountPaid: value };
+}
+
+/** Hide fully paid lines; keep only rows with an outstanding balance. */
+export function toOutstandingOnlyBreakdown(
+  breakdown: DuesBreakdown
+): DuesBreakdown {
+  const lines = breakdown.lines.filter((line) => line.outstanding > 0);
+  const arrears = breakdown.arrears
+    ?.map((month) => ({
+      ...month,
+      lines: month.lines.filter((line) => line.outstanding > 0),
+    }))
+    .filter((month) => month.lines.length > 0);
+  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
+  const arrearsTotal =
+    arrears?.reduce((sum, month) => sum + month.totalOutstanding, 0) ?? 0;
+
+  return {
+    ...breakdown,
+    lines,
+    arrears,
+    totalDue,
+    totalPaid,
+    totalOutstanding,
+    grandTotalOutstanding: totalOutstanding + arrearsTotal,
+  };
 }

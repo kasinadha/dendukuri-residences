@@ -11,10 +11,11 @@ import {
 } from "@/lib/dues-breakdown";
 import { getTenantMonthDue } from "@/lib/reminders";
 import { formatBillingMonthLabel } from "@/lib/receipts";
+import { firstMonthlyBillingMonthKey } from "@/lib/rent-billing-month";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { MonthlyDuesLedgerRow } from "@/lib/monthly-dues";
 
-function priorBillingMonthKeys(upToMonthKey: string, count = 12): string[] {
+function priorBillingMonthKeys(upToMonthKey: string, count = 1): string[] {
   const match = /^(\d{4})-(\d{2})$/.exec(upToMonthKey);
   if (!match) return [];
   let year = Number(match[1]);
@@ -95,7 +96,8 @@ function buildLinesFromMonthDue(monthDue: MonthlyDuesLedgerRow): DuesBreakdownLi
 
 function buildBreakdownFromMonthDue(
   monthDue: MonthlyDuesLedgerRow,
-  billingMonthKey: string
+  billingMonthKey: string,
+  infoMessage?: string
 ): DuesBreakdown {
   const lines = buildLinesFromMonthDue(monthDue);
   const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
@@ -105,7 +107,16 @@ function buildBreakdownFromMonthDue(
     totalDue,
     totalPaid,
     totalOutstanding,
+    infoMessage,
   };
+}
+
+async function loadMonthDueForTenancy(
+  supabase: SupabaseClient,
+  tenancyId: string,
+  billingMonthKey: string
+): Promise<MonthlyDuesLedgerRow | null> {
+  return getTenantMonthDue(supabase, tenancyId, billingMonthKey);
 }
 
 export async function verifyPublicPayTenantPhone(
@@ -158,7 +169,7 @@ export async function getTenancyDuesBreakdown(
     billingMonthKey: string;
   }
 ): Promise<{ ok: true; breakdown: DuesBreakdown } | { ok: false; error: string }> {
-  const monthDue = await getTenantMonthDue(
+  const monthDue = await loadMonthDueForTenancy(
     supabase,
     input.tenancyId,
     input.billingMonthKey
@@ -168,13 +179,32 @@ export async function getTenancyDuesBreakdown(
     return { ok: false, error: "No tenancy dues found for this period." };
   }
 
+  let infoMessage: string | undefined;
+  if (
+    monthDue.totalDue === 0 &&
+    monthDue.outstanding === 0 &&
+    monthDue.startDate
+  ) {
+    const firstDue = firstMonthlyBillingMonthKey(monthDue.startDate);
+    if (
+      firstDue &&
+      input.billingMonthKey < firstDue
+    ) {
+      infoMessage = `No dues for this month. First rent is due ${formatBillingMonthLabel(firstDue)}.`;
+    }
+  }
+
   return {
     ok: true,
-    breakdown: buildBreakdownFromMonthDue(monthDue, input.billingMonthKey),
+    breakdown: buildBreakdownFromMonthDue(
+      monthDue,
+      input.billingMonthKey,
+      infoMessage
+    ),
   };
 }
 
-/** Current month breakdown plus outstanding from prior months (up to 12). */
+/** Current month breakdown plus outstanding from the prior billing month only. */
 export async function getTenancyDuesBreakdownWithArrears(
   supabase: SupabaseClient,
   input: {
@@ -187,8 +217,8 @@ export async function getTenancyDuesBreakdownWithArrears(
   if (!current.ok) return current;
 
   const arrears: ArrearsMonthBreakdown[] = [];
-  for (const monthKey of priorBillingMonthKeys(input.billingMonthKey)) {
-    const monthDue = await getTenantMonthDue(
+  for (const monthKey of priorBillingMonthKeys(input.billingMonthKey, 1)) {
+    const monthDue = await loadMonthDueForTenancy(
       supabase,
       input.tenancyId,
       monthKey
