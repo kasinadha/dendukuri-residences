@@ -3,6 +3,7 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import OwnerDuesRemindersPanel from "@/components/admin/OwnerDuesRemindersPanel";
 import PaymentSubmissionsPanel from "@/components/admin/PaymentSubmissionsPanel";
 import PaymentVoidButton from "@/components/admin/PaymentVoidButton";
+import ReclassifyDepositButton from "@/components/admin/ReclassifyDepositButton";
 import RecordPaymentForm, {
   type TenancyOption,
 } from "@/components/admin/RecordPaymentForm";
@@ -401,6 +402,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
                       ? ` of ${formatInr(row.amountDue)}`
                       : ""}{" "}
                     · {formatDisplayDate(row.paymentDate)}
+                    {row.paymentType ? ` · ${row.paymentType}` : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -435,6 +437,13 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     amountPaidLabel={formatInr(row.amountPaid)}
                     receiptNumber={row.receiptNumber}
                   />
+                  {row.paymentType === "rent" ? (
+                    <ReclassifyDepositButton
+                      paymentId={row.paymentId}
+                      flatNumber={row.flatNumber}
+                      amountPaidLabel={formatInr(row.amountPaid)}
+                    />
+                  ) : null}
                 </div>
               </li>
             ))}

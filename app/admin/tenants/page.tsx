@@ -395,6 +395,8 @@ export default async function TenantsPage({
                       depositAmount={tenant.depositAmount}
                       depositPaid={tenant.depositPaid}
                       depositPaidDate={tenant.depositPaidDate}
+                      depositReturned={tenant.depositReturned}
+                      depositReturnedDate={tenant.depositReturnedDate}
                       monthlyCharges={tenant.monthlyCharges}
                       tenancyId={tenant.tenancyId}
                       hasActiveTenancy={tenant.hasActiveTenancy}
