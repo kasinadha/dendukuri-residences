@@ -13,12 +13,14 @@ import { listMaintenanceRequests } from "@/lib/maintenance";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr, listReceiptViews } from "@/lib/receipts";
 import { getTenantMonthDue } from "@/lib/reminders";
+import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 export default async function TenantHomePage() {
   const { supabase, user, profile } = await requireTenant();
   const ctx = await getTenantPortalContext(supabase, user.id);
-  const receipts = (await listReceiptViews(supabase, { limit: 20 })).filter(
+  const duesClient = getTenantDuesSupabaseClient(supabase);
+  const receipts = (await listReceiptViews(duesClient, { limit: 20 })).filter(
     (row) => row.tenantProfileId === user.id
   );
   const electricity = ctx?.flatId
@@ -28,7 +30,7 @@ export default async function TenantHomePage() {
     ? await listMaintenanceRequests(supabase, { flatId: ctx.flatId, limit: 3 })
     : [];
   const monthDue = ctx?.tenancyId
-    ? await getTenantMonthDue(supabase, ctx.tenancyId)
+    ? await getTenantMonthDue(duesClient, ctx.tenancyId)
     : null;
 
   const latestReceipt = receipts[0] ?? null;
