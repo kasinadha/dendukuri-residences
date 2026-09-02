@@ -167,6 +167,8 @@ export async function updateTenantTermsAction(formData: FormData) {
     depositAmount: asOptionalNumber(formData, "deposit_amount"),
     depositPaid: asOptionalNumber(formData, "deposit_paid"),
     depositPaidDate: asString(formData, "deposit_paid_date") || null,
+    depositReturned: asOptionalNumber(formData, "deposit_returned"),
+    depositReturnedDate: asString(formData, "deposit_returned_date") || null,
     maintenanceCharge: asOptionalNumber(formData, "maintenance_charge"),
     carParkingCharge: asOptionalNumber(formData, "car_parking_charge"),
     washingMachineCharge: asOptionalNumber(formData, "washing_machine_charge"),
@@ -178,6 +180,7 @@ export async function updateTenantTermsAction(formData: FormData) {
   if (result.ok) {
     revalidateOccupancy();
     revalidatePath("/admin/payments");
+    revalidatePath("/admin/accounts");
     revalidatePath("/admin/flats");
   }
   return result;

@@ -26,6 +26,7 @@ import {
 } from "@/lib/receipts";
 import { voidPaymentRecord } from "@/lib/void-payment";
 import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
+import { reclassifyPaymentAsDeposit } from "@/lib/deposits";
 import { incrementTenancyDepositPaid } from "@/lib/tenants";
 
 export type RecordPaymentResult =
@@ -280,10 +281,20 @@ function revalidateAfterPaymentChange() {
   revalidatePath("/admin/receipts");
   revalidatePath("/admin");
   revalidatePath("/admin/reports");
+  revalidatePath("/admin/accounts");
   revalidatePath("/admin/tenants");
   revalidatePath("/tenant/receipts");
   revalidatePath("/tenant/pay");
   revalidatePath("/tenant");
+}
+
+export async function reclassifyPaymentAsDepositAction(paymentId: string) {
+  const { supabase } = await requireAdmin();
+  const result = await reclassifyPaymentAsDeposit(supabase, paymentId);
+  if (result.ok) {
+    revalidateAfterPaymentChange();
+  }
+  return result;
 }
 
 export async function voidPaymentAction(formData: FormData) {

@@ -4,18 +4,11 @@ import {
   buildingWingLabel,
   type BuildingWing,
 } from "@/lib/building-wing";
+import type { BuildingDepositRow } from "@/lib/deposits";
+import { loadDepositSummary } from "@/lib/deposits";
 import { parseBillingMonthFromNotes } from "@/lib/receipts";
 
-export type BuildingDepositRow = {
-  wing: BuildingWing;
-  label: string;
-  /** Total advance agreed across tenancies */
-  agreed: number;
-  /** Total advance/deposit paid (all time, from tenancy records) */
-  paid: number;
-  outstanding: number;
-  tenantCount: number;
-};
+export type { BuildingDepositRow } from "@/lib/deposits";
 
 export type BuildingRevenueRow = {
   wing: BuildingWing;
@@ -54,10 +47,11 @@ export type AccountExpenseRow = {
 
 export type BuildingRevenueReport = {
   billingMonthKey: string | null;
-  /** All-time deposit balances by building (from tenancy records) */
   depositsByBuilding: BuildingDepositRow[];
   totalDepositsAgreed: number;
   totalDepositsPaid: number;
+  totalDepositsReturned: number;
+  totalDepositsHeld: number;
   byBuilding: BuildingRevenueRow[];
   sharedBuildingExpenses: SharedBuildingExpenseSummary;
   byAccount: AccountRevenueRow[];
@@ -122,50 +116,21 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
 
 async function loadDepositTotalsByBuilding(
   supabase: SupabaseClient
-): Promise<BuildingDepositRow[]> {
-  const { data } = await supabase.from("tenancies").select(`
-      deposit_amount,
-      deposit_paid,
-      security_deposit,
-      flats ( flat_number )
-    `);
-
-  const byWing = new Map<
-    BuildingWing,
-    { agreed: number; paid: number; count: number }
-  >();
-
-  for (const row of data ?? []) {
-    const flat = unwrapOne(row.flats as { flat_number?: string } | null);
-    const wing = buildingWingFromFlatNumber(flat?.flat_number ?? null);
-    if (!wing) continue;
-
-    const agreed =
-      num(row.deposit_amount) > 0
-        ? num(row.deposit_amount)
-        : num(row.security_deposit);
-    const paid = num(row.deposit_paid);
-    if (agreed <= 0 && paid <= 0) continue;
-
-    const prev = byWing.get(wing) ?? { agreed: 0, paid: 0, count: 0 };
-    byWing.set(wing, {
-      agreed: prev.agreed + agreed,
-      paid: prev.paid + paid,
-      count: prev.count + 1,
-    });
-  }
-
-  return (["C", "D"] as BuildingWing[]).map((wing) => {
-    const totals = byWing.get(wing) ?? { agreed: 0, paid: 0, count: 0 };
-    return {
-      wing,
-      label: buildingWingLabel(wing),
-      agreed: totals.agreed,
-      paid: totals.paid,
-      outstanding: Math.max(0, totals.agreed - totals.paid),
-      tenantCount: totals.count,
-    };
-  });
+): Promise<{
+  byBuilding: BuildingDepositRow[];
+  totalAgreed: number;
+  totalCollected: number;
+  totalReturned: number;
+  totalHeld: number;
+}> {
+  const summary = await loadDepositSummary(supabase);
+  return {
+    byBuilding: summary.byBuilding,
+    totalAgreed: summary.totalAgreed,
+    totalCollected: summary.totalCollected,
+    totalReturned: summary.totalReturned,
+    totalHeld: summary.totalHeld,
+  };
 }
 
 export async function getBuildingRevenueReport(
@@ -180,7 +145,7 @@ export async function getBuildingRevenueReport(
     tankersResult,
     maintenanceResult,
     otherResult,
-    depositsByBuilding,
+    depositSummary,
   ] = await Promise.all([
     supabase
       .from("payments")
@@ -225,6 +190,7 @@ export async function getBuildingRevenueReport(
   ]);
 
   const accountLabelById = new Map<string, string>();
+  const depositsByBuilding = depositSummary.byBuilding;
   for (const row of accountsResult.data ?? []) {
     accountLabelById.set(row.id, row.label?.trim() || row.code || "Account");
   }
@@ -449,20 +415,18 @@ export async function getBuildingRevenueReport(
     }))
     .sort((a, b) => b.spent - a.spent);
 
-  const totalDepositsAgreed = depositsByBuilding.reduce(
-    (sum, row) => sum + row.agreed,
-    0
-  );
-  const totalDepositsPaid = depositsByBuilding.reduce(
-    (sum, row) => sum + row.paid,
-    0
-  );
+  const totalDepositsAgreed = depositSummary.totalAgreed;
+  const totalDepositsPaid = depositSummary.totalCollected;
+  const totalDepositsReturned = depositSummary.totalReturned;
+  const totalDepositsHeld = depositSummary.totalHeld;
 
   return {
     billingMonthKey: billingMonth,
     depositsByBuilding,
     totalDepositsAgreed,
     totalDepositsPaid,
+    totalDepositsReturned,
+    totalDepositsHeld,
     byBuilding,
     sharedBuildingExpenses: {
       spent: sharedTotals.spent,

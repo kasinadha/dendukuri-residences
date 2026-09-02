@@ -19,6 +19,8 @@ export type TenantListItem = {
   depositAmount: number | null;
   depositPaid: number | null;
   depositPaidDate: string | null;
+  depositReturned?: number | null;
+  depositReturnedDate?: string | null;
   monthlyCharges: TenantMonthlyCharges | null;
   tenancyStatus: string | null;
   hasActiveTenancy: boolean;
@@ -60,6 +62,8 @@ type TenancyJoin = {
   deposit_amount: number | string | null;
   deposit_paid: number | string | null;
   deposit_paid_date: string | null;
+  deposit_returned?: number | string | null;
+  deposit_returned_date?: string | null;
   maintenance_charge: number | string | null;
   car_parking_charge: number | string | null;
   washing_machine_charge: number | string | null;
@@ -116,6 +120,8 @@ export async function updateTenantTenancyTerms(
     depositAmount: number | null;
     depositPaid: number | null;
     depositPaidDate: string | null;
+    depositReturned: number | null;
+    depositReturnedDate: string | null;
     maintenanceCharge: number | null;
     carParkingCharge: number | null;
     washingMachineCharge: number | null;
@@ -150,6 +156,12 @@ export async function updateTenantTenancyTerms(
     }
   }
 
+  if (input.depositReturned != null) {
+    if (!Number.isFinite(input.depositReturned) || input.depositReturned < 0) {
+      return { ok: false, error: "Enter a valid deposit returned amount." };
+    }
+  }
+
   for (const [label, value] of [
     ["Maintenance", input.maintenanceCharge],
     ["Car parking", input.carParkingCharge],
@@ -167,6 +179,8 @@ export async function updateTenantTenancyTerms(
     security_deposit: input.depositAmount,
     deposit_paid: input.depositPaid,
     deposit_paid_date: input.depositPaidDate || null,
+    deposit_returned: input.depositReturned ?? 0,
+    deposit_returned_date: input.depositReturnedDate || null,
     maintenance_charge: input.maintenanceCharge ?? 0,
     car_parking_charge: input.carParkingCharge ?? 0,
     washing_machine_charge: input.washingMachineCharge ?? 0,
@@ -491,6 +505,8 @@ export async function listTenantsForAdmin(
         deposit_amount,
         deposit_paid,
         deposit_paid_date,
+        deposit_returned,
+        deposit_returned_date,
         maintenance_charge,
         car_parking_charge,
         washing_machine_charge,
@@ -522,6 +538,8 @@ export async function listTenantsForAdmin(
           deposit_amount,
           deposit_paid,
           deposit_paid_date,
+          deposit_returned,
+          deposit_returned_date,
           flats ( flat_number, flat_type, status, maintenance_amount )
         )
       `
@@ -618,6 +636,8 @@ function mapTenantRows(
       depositAmount,
       depositPaid: num(activeTenancy?.deposit_paid),
       depositPaidDate: activeTenancy?.deposit_paid_date ?? null,
+      depositReturned: num(activeTenancy?.deposit_returned),
+      depositReturnedDate: activeTenancy?.deposit_returned_date ?? null,
       monthlyCharges,
       tenancyStatus: displayTenancy?.status?.trim() || null,
       hasActiveTenancy: hasActive,
@@ -648,7 +668,7 @@ export async function incrementTenancyDepositPaid(
 
   const { data, error } = await supabase
     .from("tenancies")
-    .select("deposit_paid")
+    .select("deposit_paid, deposit_amount, security_deposit")
     .eq("id", input.tenancyId)
     .maybeSingle();
 
@@ -657,11 +677,16 @@ export async function incrementTenancyDepositPaid(
   }
 
   const nextPaid = (num(data.deposit_paid) ?? 0) + input.amount;
+  const depositAmount =
+    num(data.deposit_amount) ?? num(data.security_deposit) ?? null;
   const { error: updateError } = await supabase
     .from("tenancies")
     .update({
       deposit_paid: nextPaid,
       deposit_paid_date: input.paymentDate,
+      ...(depositAmount != null
+        ? { deposit_amount: depositAmount, security_deposit: depositAmount }
+        : {}),
     })
     .eq("id", input.tenancyId);
 

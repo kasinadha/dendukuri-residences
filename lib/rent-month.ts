@@ -61,6 +61,7 @@ export type PaymentHistoryRow = {
   status: PaymentStatus;
   paymentDate: string;
   paymentMode: string | null;
+  paymentType: string | null;
   transactionReference: string | null;
   receiptId: string | null;
   receiptNumber: string | null;
@@ -325,6 +326,7 @@ export async function listPaymentHistory(
         status,
         paymentDate: String(payment.payment_date ?? ""),
         paymentMode: (payment.payment_mode as string | null) ?? null,
+        paymentType: (payment.payment_type as string | null) ?? null,
         transactionReference:
           (payment.transaction_reference as string | null) ?? null,
         receiptId: receipt?.id ?? null,

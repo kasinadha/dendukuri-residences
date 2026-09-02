@@ -19,48 +19,85 @@ export default function BuildingRevenuePanel({
       <section className="rounded-2xl border border-violet-200 bg-violet-50/50 shadow-sm">
         <div className="border-b border-violet-100 px-5 py-4 sm:px-6">
           <h3 className="text-lg font-bold text-slate-900">
-            Deposits collected (overall)
+            Deposits (overall)
           </h3>
           <p className="mt-1 text-sm text-slate-600">
-            Advance/deposit held per building from tenancy records (not monthly
-            rent). Agreed vs paid across all tenants.
+            Agreed, collected, returned, and currently held per building. Uses
+            tenancy records plus deposit/advance payments.
           </p>
         </div>
         <ul className="divide-y divide-violet-100">
           {report.depositsByBuilding.map((row) => (
-            <li
-              key={row.wing}
-              className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-            >
-              <div>
-                <p className="font-semibold text-slate-900">{row.label}</p>
-                <p className="text-xs text-slate-500">
-                  {row.tenantCount} tenant{row.tenantCount === 1 ? "" : "s"} with
-                  deposit on record
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-                <span>
-                  Agreed{" "}
-                  <span className="font-semibold text-slate-900">
-                    {formatInr(row.agreed)}
-                  </span>
-                </span>
-                <span>
-                  Collected{" "}
-                  <span className="font-semibold text-violet-800">
-                    {formatInr(row.paid)}
-                  </span>
-                </span>
-                {row.outstanding > 0 ? (
+            <li key={row.wing} className="px-5 py-4 sm:px-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-semibold text-slate-900">{row.label}</p>
+                  <p className="text-xs text-slate-500">
+                    {row.tenantCount} tenant{row.tenantCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
                   <span>
-                    Pending{" "}
-                    <span className="font-semibold text-amber-800">
-                      {formatInr(row.outstanding)}
+                    Agreed{" "}
+                    <span className="font-semibold text-slate-900">
+                      {formatInr(row.agreed)}
                     </span>
                   </span>
-                ) : null}
+                  <span>
+                    Collected{" "}
+                    <span className="font-semibold text-violet-800">
+                      {formatInr(row.collected)}
+                    </span>
+                  </span>
+                  {row.returned > 0 ? (
+                    <span>
+                      Returned{" "}
+                      <span className="font-semibold text-slate-700">
+                        {formatInr(row.returned)}
+                      </span>
+                    </span>
+                  ) : null}
+                  <span>
+                    Held{" "}
+                    <span className="font-semibold text-emerald-800">
+                      {formatInr(row.held)}
+                    </span>
+                  </span>
+                  {row.outstanding > 0 ? (
+                    <span>
+                      Pending{" "}
+                      <span className="font-semibold text-amber-800">
+                        {formatInr(row.outstanding)}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
               </div>
+              {row.tenants.length > 0 ? (
+                <ul className="mt-3 divide-y divide-violet-100/80 rounded-xl border border-violet-100 bg-white/70 text-sm">
+                  {row.tenants.map((tenant) => (
+                    <li
+                      key={tenant.tenancyId}
+                      className="flex flex-col gap-1 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <span className="font-medium text-slate-900">
+                        Flat {tenant.flatNumber} · {tenant.tenantName}
+                      </span>
+                      <span className="text-xs text-slate-600 sm:text-sm">
+                        Agreed {formatInr(tenant.agreed)} · Collected{" "}
+                        {formatInr(tenant.collected)}
+                        {tenant.returned > 0
+                          ? ` · Returned ${formatInr(tenant.returned)}`
+                          : ""}
+                        {" · "}Held {formatInr(tenant.held)}
+                        {tenant.pending > 0
+                          ? ` · Pending ${formatInr(tenant.pending)}`
+                          : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -68,6 +105,14 @@ export default function BuildingRevenuePanel({
           <span className="font-semibold text-slate-900">
             Total deposits collected: {formatInr(report.totalDepositsPaid)}
           </span>
+          {report.totalDepositsReturned > 0 ? (
+            <>
+              <span className="mx-2">·</span>
+              <span>Returned {formatInr(report.totalDepositsReturned)}</span>
+            </>
+          ) : null}
+          <span className="mx-2">·</span>
+          <span>Held {formatInr(report.totalDepositsHeld)}</span>
           {report.totalDepositsAgreed > report.totalDepositsPaid ? (
             <>
               <span className="mx-2">·</span>
@@ -123,14 +168,14 @@ export default function BuildingRevenuePanel({
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
                     <span>
-                      Dues{" "}
+                      Dues collected{" "}
                       <span className="font-semibold text-slate-900">
                         {formatInr(row.duesCollected)}
                       </span>
                     </span>
                     {row.depositsCollected > 0 ? (
                       <span>
-                        Deposits{" "}
+                        Deposits collected{" "}
                         <span className="font-semibold text-violet-800">
                           {formatInr(row.depositsCollected)}
                         </span>
@@ -185,12 +230,12 @@ export default function BuildingRevenuePanel({
                         <p className="font-semibold text-emerald-700">
                           {formatInr(row.duesCollected)}
                         </p>
-                        <p className="text-xs text-slate-500">dues</p>
+                        <p className="text-xs text-slate-500">Dues collected</p>
                       </div>
                     </div>
                     {row.depositsCollected > 0 ? (
                       <p className="mt-1 text-right text-xs text-violet-800">
-                        + {formatInr(row.depositsCollected)} deposits
+                        Deposits collected {formatInr(row.depositsCollected)}
                       </p>
                     ) : null}
                   </li>
@@ -241,7 +286,7 @@ export default function BuildingRevenuePanel({
           </span>
           <span className="mx-2">·</span>
           <span className="font-semibold text-violet-900">
-            Deposits received ({periodLabel}):{" "}
+            Deposits collected ({periodLabel}):{" "}
             {formatInr(report.totalDepositsCollected)}
           </span>
           <span className="mx-2">·</span>

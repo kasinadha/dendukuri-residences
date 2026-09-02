@@ -19,6 +19,8 @@ type Props = {
   depositAmount: number | null;
   depositPaid: number | null;
   depositPaidDate: string | null;
+  depositReturned?: number | null;
+  depositReturnedDate?: string | null;
   monthlyCharges: TenantMonthlyCharges | null;
   tenancyId: string | null;
   hasActiveTenancy: boolean;
@@ -51,6 +53,8 @@ export default function TenantDetailsEditor({
   depositAmount,
   depositPaid,
   depositPaidDate,
+  depositReturned = null,
+  depositReturnedDate = null,
   monthlyCharges,
   tenancyId,
   hasActiveTenancy,
@@ -68,6 +72,10 @@ export default function TenantDetailsEditor({
   const balance =
     depositAmount != null && depositPaid != null
       ? depositAmount - depositPaid
+      : null;
+  const held =
+    depositPaid != null
+      ? Math.max(0, depositPaid - (depositReturned ?? 0))
       : null;
 
   function handleContactSubmit(event: FormEvent<HTMLFormElement>) {
@@ -104,6 +112,8 @@ export default function TenantDetailsEditor({
     const nextDeposit = formData.get("deposit_amount");
     const nextPaid = formData.get("deposit_paid");
     const nextPaidDate = formData.get("deposit_paid_date");
+    const nextReturned = formData.get("deposit_returned");
+    const nextReturnedDate = formData.get("deposit_returned_date");
     const nextMaintenance = formData.get("maintenance_charge");
     const nextParking = formData.get("car_parking_charge");
     const nextWasher = formData.get("washing_machine_charge");
@@ -121,6 +131,11 @@ export default function TenantDetailsEditor({
       (depositPaid != null ? String(depositPaid) : "");
     const dateChanged =
       String(nextPaidDate ?? "") !== (depositPaidDate ?? "");
+    const returnedChanged =
+      String(nextReturned ?? "") !==
+      (depositReturned != null ? String(depositReturned) : "");
+    const returnedDateChanged =
+      String(nextReturnedDate ?? "") !== (depositReturnedDate ?? "");
     const maintenanceChanged =
       String(nextMaintenance ?? "") !==
       String(monthlyCharges?.maintenanceCharge ?? 0);
@@ -142,6 +157,8 @@ export default function TenantDetailsEditor({
       depositChanged ||
       paidChanged ||
       dateChanged ||
+      returnedChanged ||
+      returnedDateChanged ||
       maintenanceChanged ||
       parkingChanged ||
       washerChanged ||
@@ -180,6 +197,16 @@ export default function TenantDetailsEditor({
         dateChanged
           ? `• Advance paid date: ${formatShortDate(depositPaidDate)} → ${formatShortDate(
               typeof nextPaidDate === "string" ? nextPaidDate : null
+            )}`
+          : null,
+        returnedChanged
+          ? `• Deposit returned: ${describeAmount(depositReturned)} → ${describeAmount(
+              nextReturned ? Number(nextReturned) : null
+            )}`
+          : null,
+        returnedDateChanged
+          ? `• Deposit returned date: ${formatShortDate(depositReturnedDate)} → ${formatShortDate(
+              typeof nextReturnedDate === "string" ? nextReturnedDate : null
             )}`
           : null,
         maintenanceChanged
@@ -284,6 +311,17 @@ export default function TenantDetailsEditor({
             Paid {describeAmount(depositPaid)}
             {depositPaidDate ? ` · ${formatShortDate(depositPaidDate)}` : ""}
           </p>
+          {(depositReturned ?? 0) > 0 || depositReturnedDate ? (
+            <p>
+              Returned {describeAmount(depositReturned)}
+              {depositReturnedDate
+                ? ` · ${formatShortDate(depositReturnedDate)}`
+                : ""}
+            </p>
+          ) : null}
+          {held != null && held > 0 ? (
+            <p>Held {formatInr(held)}</p>
+          ) : null}
           {monthlyCharges ? (
             <>
               <p className="mt-2 font-semibold text-slate-800">Monthly charges</p>
@@ -530,6 +568,32 @@ export default function TenantDetailsEditor({
                 type="date"
                 name="deposit_paid_date"
                 defaultValue={depositPaidDate ?? ""}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Deposit returned (₹)
+              </span>
+              <input
+                type="number"
+                name="deposit_returned"
+                min={0}
+                step={1}
+                defaultValue={
+                  depositReturned != null ? String(depositReturned) : ""
+                }
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                Deposit returned date
+              </span>
+              <input
+                type="date"
+                name="deposit_returned_date"
+                defaultValue={depositReturnedDate ?? ""}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
               />
             </label>
