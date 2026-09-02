@@ -1,10 +1,45 @@
 import { formatInr } from "@/lib/receipts";
-import type { BuildingRevenueReport } from "@/lib/building-revenue";
+import type {
+  BuildingRevenueReport,
+  DuesCategoryBreakdown,
+} from "@/lib/building-revenue";
 
 type Props = {
   report: BuildingRevenueReport;
   billingMonthLabel: string;
 };
+
+function DuesBreakdownLine({
+  breakdown,
+  className = "",
+}: {
+  breakdown: DuesCategoryBreakdown;
+  className?: string;
+}) {
+  const parts = [
+    breakdown.rent > 0
+      ? `Rent ${formatInr(breakdown.rent)}`
+      : null,
+    breakdown.electricity > 0
+      ? `Electricity ${formatInr(breakdown.electricity)}`
+      : null,
+    breakdown.other > 0 ? `Other ${formatInr(breakdown.other)}` : null,
+  ].filter(Boolean);
+
+  if (parts.length === 0) {
+    return (
+      <p className={`text-xs text-slate-500 ${className}`.trim()}>
+        No category split recorded for this period.
+      </p>
+    );
+  }
+
+  return (
+    <p className={`text-xs text-slate-600 ${className}`.trim()}>
+      {parts.join(" · ")}
+    </p>
+  );
+}
 
 export default function BuildingRevenuePanel({
   report,
@@ -188,6 +223,7 @@ export default function BuildingRevenuePanel({
                       </span>
                     </span>
                   </div>
+                  <DuesBreakdownLine breakdown={row.duesBreakdown} />
                 </li>
               ))}
             </ul>
@@ -280,19 +316,27 @@ export default function BuildingRevenuePanel({
         </div>
 
         <div className="border-t border-slate-100 px-5 py-4 text-sm text-slate-600 sm:px-6">
-          <span className="font-semibold text-slate-900">
-            Dues collected ({periodLabel}):{" "}
-            {formatInr(report.totalDuesCollected)}
-          </span>
-          <span className="mx-2">·</span>
-          <span className="font-semibold text-violet-900">
-            Deposits collected ({periodLabel}):{" "}
-            {formatInr(report.totalDepositsCollected)}
-          </span>
-          <span className="mx-2">·</span>
-          <span className="font-semibold text-slate-900">
-            Expenses: {formatInr(report.totalExpenses)}
-          </span>
+          <div className="flex flex-col gap-2">
+            <div>
+              <span className="font-semibold text-slate-900">
+                Dues collected ({periodLabel}):{" "}
+                {formatInr(report.totalDuesCollected)}
+              </span>
+              <span className="mx-2">·</span>
+              <span className="font-semibold text-violet-900">
+                Deposits collected ({periodLabel}):{" "}
+                {formatInr(report.totalDepositsCollected)}
+              </span>
+              <span className="mx-2">·</span>
+              <span className="font-semibold text-slate-900">
+                Expenses: {formatInr(report.totalExpenses)}
+              </span>
+            </div>
+            <DuesBreakdownLine
+              breakdown={report.totalDuesBreakdown}
+              className="text-sm"
+            />
+          </div>
         </div>
       </section>
     </div>
