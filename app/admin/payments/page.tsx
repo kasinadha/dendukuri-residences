@@ -26,8 +26,10 @@ import {
   listUnpaidRentReminders,
 } from "@/lib/reminders";
 import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
+import { getMonthlyDepositsCollected } from "@/lib/building-revenue";
 import { listPaymentHistory } from "@/lib/rent-month";
 import { getWhatsAppBusinessConfig } from "@/lib/whatsapp";
+import { currentBillingMonthKey } from "@/lib/rent-upi";
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
@@ -72,6 +74,9 @@ export default async function PaymentsPage({ searchParams }: Props) {
       id,
       status,
       monthly_rent,
+      deposit_amount,
+      deposit_paid,
+      security_deposit,
       tenants ( full_name ),
       flats ( id, flat_number, upi_id, upi_qr_url, payment_account_id )
     `
@@ -80,9 +85,13 @@ export default async function PaymentsPage({ searchParams }: Props) {
 
   const whatsapp = getWhatsAppBusinessConfig();
 
-  const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
+  const [monthSummary, depositsCollected, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
     await Promise.all([
       getMonthlyDuesSummary(supabase, month),
+      getMonthlyDepositsCollected(
+        supabase,
+        month ?? currentBillingMonthKey()
+      ),
       listPaymentHistory(supabase, {
         month,
         flat,
@@ -125,12 +134,22 @@ export default async function PaymentsPage({ searchParams }: Props) {
       const vacated = !isActiveTenancyStatus(row.status);
       const flatNumber = flatRow?.flat_number?.trim() || "—";
       const tenantName = tenantRow?.full_name?.trim() || "Tenant";
+      const depositAmount =
+        row.deposit_amount != null
+          ? Number(row.deposit_amount)
+          : row.security_deposit != null
+            ? Number(row.security_deposit)
+            : null;
+      const depositPaid =
+        row.deposit_paid != null ? Number(row.deposit_paid) : null;
       return {
         id: row.id,
         flatId: flatRow?.id ?? "",
         flatNumber,
         tenantName,
         monthlyRent: Number.isFinite(rent) ? rent : null,
+        depositAmount: Number.isFinite(depositAmount) ? depositAmount : null,
+        depositPaid: Number.isFinite(depositPaid) ? depositPaid : null,
         label: `Flat ${flatNumber} — ${tenantName}${vacated ? " (vacated)" : ""}`,
         suggestedReceiverAccountId:
           flatRow?.payment_account_id ?? suggested?.id ?? null,
@@ -176,9 +195,14 @@ export default async function PaymentsPage({ searchParams }: Props) {
             detail: "Rent + monthly charges + electricity",
           },
           {
-            title: "Collected",
+            title: "Dues collected",
             value: formatInr(monthSummary.totalCollected),
             detail: `${monthSummary.paidTenants} paid · ${monthSummary.partialTenants} partial`,
+          },
+          {
+            title: "Deposits collected",
+            value: formatInr(depositsCollected),
+            detail: "Advance/deposit payments this month only",
           },
           {
             title: "Outstanding",
