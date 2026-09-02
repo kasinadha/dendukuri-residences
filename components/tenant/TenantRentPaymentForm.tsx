@@ -9,6 +9,8 @@ import {
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import {
   applyAdditionalPaymentToBreakdown,
+  breakdownPaymentAmountDefaults,
+  toOutstandingOnlyBreakdown,
   type DuesBreakdown,
 } from "@/lib/dues-breakdown";
 import {
@@ -49,8 +51,12 @@ export default function TenantRentPaymentForm({
   const amountNum = Number(amount);
   const previewBreakdown = useMemo(() => {
     if (!breakdown) return null;
-    if (!Number.isFinite(amountNum) || amountNum <= 0) return breakdown;
-    return applyAdditionalPaymentToBreakdown(breakdown, amountNum);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return toOutstandingOnlyBreakdown(breakdown);
+    }
+    return toOutstandingOnlyBreakdown(
+      applyAdditionalPaymentToBreakdown(breakdown, amountNum)
+    );
   }, [breakdown, amountNum]);
   const upiLink = useMemo(() => {
     if (!upiId || !Number.isFinite(amountNum) || amountNum <= 0) return null;
@@ -78,10 +84,8 @@ export default function TenantRentPaymentForm({
       }
       setBreakdownError("");
       setBreakdown(result.breakdown);
-      const outstanding =
-        result.breakdown.grandTotalOutstanding ??
-        result.breakdown.totalOutstanding;
-      setAmount(outstanding > 0 ? String(outstanding) : "");
+      const defaults = breakdownPaymentAmountDefaults(result.breakdown);
+      setAmount(defaults.amountPaid);
     });
     return () => {
       cancelled = true;
@@ -273,6 +277,11 @@ export default function TenantRentPaymentForm({
         {previewBreakdown ? (
           <div className="mt-6">
             <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
+            {breakdown?.infoMessage ? (
+              <p className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                {breakdown.infoMessage}
+              </p>
+            ) : null}
             <div className="mt-3">
               <DuesBreakdownTable breakdown={previewBreakdown} />
             </div>

@@ -3,6 +3,7 @@ import { listMaintenanceRequests } from "@/lib/maintenance";
 import {
   formatMonthlyDuesBreakdown,
   getMonthlyDuesSummary,
+  getTenancyMonthlyDueRow,
   type MonthlyDuesLedgerRow,
 } from "@/lib/monthly-dues";
 import { formatExpenseLocation } from "@/lib/expense-location";
@@ -227,6 +228,10 @@ export async function getTenantMonthDue(
   billingMonthKey?: string
 ): Promise<MonthlyDuesLedgerRow | null> {
   if (!tenancyId) return null;
-  const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
-  return summary.rows.find((row) => row.tenancyId === tenancyId) ?? null;
+  const monthKey = billingMonthKey?.trim();
+  const summary = await getMonthlyDuesSummary(supabase, monthKey);
+  const found = summary.rows.find((row) => row.tenancyId === tenancyId);
+  if (found) return found;
+  if (!monthKey) return null;
+  return getTenancyMonthlyDueRow(supabase, tenancyId, monthKey);
 }

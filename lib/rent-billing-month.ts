@@ -37,3 +37,21 @@ export function tenancyIncludedInMonthlyLedger(
 ): boolean {
   return tenancyOverlapsBillingMonth(tenancy, billingMonthKey);
 }
+
+/** First calendar month when rent/charges are due (month after move-in). */
+export function firstMonthlyBillingMonthKey(
+  startDate: string | null | undefined
+): string | null {
+  const startMonth = startDate?.trim().slice(0, 7);
+  if (!startMonth || !/^\d{4}-\d{2}$/.test(startMonth)) return null;
+
+  const year = Number(startMonth.slice(0, 4));
+  const month = Number(startMonth.slice(5, 7));
+  let nextMonth = month + 1;
+  let nextYear = year;
+  if (nextMonth > 12) {
+    nextMonth = 1;
+    nextYear += 1;
+  }
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+}
