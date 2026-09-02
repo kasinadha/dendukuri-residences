@@ -5,12 +5,14 @@ import {
   formatInr,
   listReceiptViews,
 } from "@/lib/receipts";
+import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 
 export default async function TenantReceiptsPage() {
   const { supabase, user } = await requireTenant();
+  const duesClient = getTenantDuesSupabaseClient(supabase);
 
   // Prefer RLS; also filter by linked profile_id as defense in depth.
-  const receipts = (await listReceiptViews(supabase, { limit: 100 })).filter(
+  const receipts = (await listReceiptViews(duesClient, { limit: 100 })).filter(
     (row) => row.tenantProfileId === user.id
   );
 
