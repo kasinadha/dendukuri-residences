@@ -7,7 +7,7 @@ import {
   renderToBuffer,
 } from "@react-pdf/renderer";
 import type { ReceiptViewModel } from "@/lib/receipts";
-import { formatDisplayDate, formatInr } from "@/lib/receipts";
+import { formatDisplayDate, formatInr, hraRentPaid } from "@/lib/receipts";
 
 const styles = StyleSheet.create({
   page: {
@@ -118,7 +118,72 @@ function paymentMethodLabel(value: string): string {
   return map[value] ?? value;
 }
 
-function ReceiptPdf({ receipt }: { receipt: ReceiptViewModel }) {
+function ReceiptPdf({
+  receipt,
+  kind = "full",
+}: {
+  receipt: ReceiptViewModel;
+  kind?: "full" | "hra";
+}) {
+  if (kind === "hra") {
+    const rentPaid = hraRentPaid(receipt);
+    return (
+      <Document>
+        <Page size="A4" style={styles.page}>
+          <Text style={styles.eyebrow}>House Rent Receipt (for HRA)</Text>
+          <Text style={styles.title}>{receipt.propertyName}</Text>
+          <Text style={styles.subtitle}>
+            Receipt no. {receipt.receiptNumber}
+          </Text>
+
+          <View style={[styles.section, styles.grid]}>
+            <View style={styles.gridItem}>
+              <Text style={styles.label}>Tenant name</Text>
+              <Text style={styles.value}>{receipt.tenantName}</Text>
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.label}>Flat / premises</Text>
+              <Text style={styles.value}>
+                Flat {receipt.flatNumber}, {receipt.propertyName}
+              </Text>
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.label}>Period</Text>
+              <Text style={styles.value}>{receipt.billingMonth}</Text>
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.label}>House rent received</Text>
+              <Text style={styles.value}>{formatInr(rentPaid)}</Text>
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.label}>Payment date</Text>
+              <Text style={styles.value}>
+                {formatDisplayDate(receipt.paymentDate)}
+              </Text>
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.label}>Payment method</Text>
+              <Text style={styles.value}>
+                {paymentMethodLabel(receipt.paymentMethod)}
+              </Text>
+            </View>
+            <View style={{ width: "100%", marginBottom: 12 }}>
+              <Text style={styles.label}>Transaction / reference</Text>
+              <Text style={styles.value}>{receipt.transactionReference}</Text>
+            </View>
+          </View>
+
+          <Text style={styles.footer}>
+            This receipt is for house rent only. Maintenance, electricity,
+            washing machine, parking, fines, and other charges are excluded.
+            Issued {formatDisplayDate(receipt.createdAt)} by{" "}
+            {receipt.propertyName}.
+          </Text>
+        </Page>
+      </Document>
+    );
+  }
+
   const breakdown = receipt.duesBreakdown;
 
   return (
@@ -222,14 +287,19 @@ function ReceiptPdf({ receipt }: { receipt: ReceiptViewModel }) {
   );
 }
 
-export function receiptPdfFileName(receipt: ReceiptViewModel): string {
+export function receiptPdfFileName(
+  receipt: ReceiptViewModel,
+  kind: "full" | "hra" = "full"
+): string {
   const flat = receipt.flatNumber.replace(/[^\w.-]+/g, "_");
   const number = receipt.receiptNumber.replace(/[^\w.-]+/g, "_");
-  return `Receipt_${flat}_${number}.pdf`;
+  const prefix = kind === "hra" ? "HRA_Rent_Receipt" : "Receipt";
+  return `${prefix}_${flat}_${number}.pdf`;
 }
 
 export async function renderReceiptPdfBuffer(
-  receipt: ReceiptViewModel
+  receipt: ReceiptViewModel,
+  kind: "full" | "hra" = "full"
 ): Promise<Buffer> {
-  return renderToBuffer(<ReceiptPdf receipt={receipt} />);
+  return renderToBuffer(<ReceiptPdf receipt={receipt} kind={kind} />);
 }

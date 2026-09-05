@@ -1,7 +1,10 @@
 import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DuesBreakdown } from "@/lib/dues-breakdown";
-import { parseDuesBreakdownFromNotes } from "@/lib/dues-breakdown";
+import {
+  categoryTotalsFromBreakdown,
+  parseDuesBreakdownFromNotes,
+} from "@/lib/dues-breakdown";
 import { resolveReceiptDuesBreakdown } from "@/lib/public-pay-dues";
 import { PROPERTY_NAME } from "@/lib/property";
 
@@ -48,6 +51,14 @@ export type ReceiptViewModel = {
   createdAt: string;
   duesBreakdown: DuesBreakdown | null;
 };
+
+/** House-rent portion only (excludes electricity, washer, parking, other, fines). */
+export function hraRentPaid(receipt: ReceiptViewModel): number {
+  if (receipt.duesBreakdown) {
+    return categoryTotalsFromBreakdown(receipt.duesBreakdown).rent;
+  }
+  return receipt.amountPaid > 0 ? receipt.amountPaid : 0;
+}
 
 /** YYYY-MM → "August 2026" (en-IN). */
 export function formatBillingMonthLabel(yearMonth: string | null | undefined): string {
