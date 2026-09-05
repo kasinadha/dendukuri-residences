@@ -3,6 +3,7 @@ import { listMaintenanceRequests } from "@/lib/maintenance";
 import {
   formatMonthlyDuesBreakdown,
   getMonthlyDuesSummary,
+  getTenancyMonthlyDueRow,
   type MonthlyDuesLedgerRow,
 } from "@/lib/monthly-dues";
 import { formatExpenseLocation } from "@/lib/expense-location";
@@ -15,6 +16,9 @@ import {
 import {
   formatWhatsAppBusinessPhoneDisplay,
   getWhatsAppBusinessConfig,
+  getWhatsAppTemplateLanguage,
+  getWhatsAppTemplateName,
+  sendWhatsAppBusinessMessage,
   toTenantWhatsAppUrl,
 } from "@/lib/whatsapp";
 
@@ -49,7 +53,7 @@ function reminderMessage(row: MonthlyDuesLedgerRow): string {
 }
 
 /**
- * Unpaid / partial / overdue active tenancies for a month (rent + monthly charges).
+ * Unpaid / partial / overdue tenancies for a month (rent + monthly charges + electricity).
  */
 export async function listUnpaidRentReminders(
   supabase: SupabaseClient,
@@ -61,10 +65,7 @@ export async function listUnpaidRentReminders(
 }> {
   const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
   const unpaid = summary.rows.filter(
-    (row) =>
-      row.outstanding > 0 &&
-      row.status !== "paid" &&
-      row.status !== "waived"
+    (row) => row.status !== "paid" && row.status !== "waived"
   );
 
   if (unpaid.length === 0) {
@@ -168,6 +169,133 @@ export async function markRentReminded(
   return { ok: true };
 }
 
+export async function sendUnpaidRentWhatsAppReminder(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    billingMonth: string;
+    remindedBy?: string | null;
+    channel?: string | null;
+  }
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  const tenancyId = input.tenancyId.trim();
+  const billingMonth = input.billingMonth.trim();
+  if (!tenancyId || !/^\d{4}-\d{2}$/.test(billingMonth)) {
+    return { ok: false, error: "Missing tenancy or billing month." };
+  }
+
+  const listed = await listUnpaidRentReminders(supabase, billingMonth);
+  const row = listed.rows.find((item) => item.tenancyId === tenancyId);
+  if (!row) {
+    return { ok: false, error: "Tenancy not found for this month." };
+  }
+  return sendUnpaidRentWhatsAppReminderForRow(supabase, row, {
+    remindedBy: input.remindedBy,
+    channel: input.channel,
+  });
+}
+
+export async function sendUnpaidRentWhatsAppReminderForRow(
+  supabase: SupabaseClient,
+  row: UnpaidReminderRow,
+  input?: { remindedBy?: string | null; channel?: string | null }
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  if (!row.phone) {
+    return { ok: false, error: "Tenant has no mobile number on file." };
+  }
+
+  const templateName = getWhatsAppTemplateName("dues");
+  const sendResult = await sendWhatsAppBusinessMessage({
+    toPhone: row.phone,
+    body: buildRentReminderMessage(row),
+    template: templateName
+      ? {
+          name: templateName,
+          language: getWhatsAppTemplateLanguage(),
+          bodyParams: [
+            row.flatNumber,
+            formatBillingMonthLabel(row.billingMonthKey),
+            formatInr(row.totalDue),
+            formatInr(row.outstanding),
+          ],
+        }
+      : null,
+  });
+  if (!sendResult.ok) return sendResult;
+
+  const markResult = await markRentReminded(supabase, {
+    tenancyId: row.tenancyId,
+    billingMonth: row.billingMonthKey,
+    remindedBy: input?.remindedBy,
+    channel: input?.channel?.trim() || "whatsapp_api",
+    notes: `wa_message_id:${sendResult.messageId}`,
+  });
+  if (!markResult.ok) return markResult;
+
+  return { ok: true, messageId: sendResult.messageId };
+}
+
+export function remindedWithinHours(
+  iso: string | null | undefined,
+  hours: number
+): boolean {
+  if (!iso || hours <= 0) return false;
+  const at = new Date(iso).getTime();
+  if (!Number.isFinite(at)) return false;
+  return Date.now() - at < hours * 60 * 60 * 1000;
+}
+
+export async function sendAllUnpaidWhatsAppReminders(
+  supabase: SupabaseClient,
+  input?: {
+    billingMonth?: string;
+    remindedBy?: string | null;
+    channel?: string | null;
+    skipRemindedWithinHours?: number;
+  }
+): Promise<{
+  ok: true;
+  sent: number;
+  skipped: number;
+  failed: Array<{ tenancyId: string; tenantName: string; error: string }>;
+}> {
+  const listed = await listUnpaidRentReminders(supabase, input?.billingMonth);
+  let sent = 0;
+  let skipped = 0;
+  const failed: Array<{
+    tenancyId: string;
+    tenantName: string;
+    error: string;
+  }> = [];
+  const skipHours = input?.skipRemindedWithinHours ?? 0;
+
+  for (const row of listed.rows) {
+    if (!row.phone) {
+      skipped += 1;
+      continue;
+    }
+    if (remindedWithinHours(row.remindedAt, skipHours)) {
+      skipped += 1;
+      continue;
+    }
+    const result = await sendUnpaidRentWhatsAppReminderForRow(supabase, row, {
+      remindedBy: input?.remindedBy,
+      channel: input?.channel,
+    });
+    if (result.ok) {
+      sent += 1;
+    } else {
+      failed.push({
+        tenancyId: row.tenancyId,
+        tenantName: row.tenantName,
+        error: result.error,
+      });
+    }
+  }
+
+  return { ok: true, sent, skipped, failed };
+}
+
 /** Owner-side dues: unpaid water tankers + open maintenance with cost. */
 export async function listOwnerDueReminders(
   supabase: SupabaseClient
@@ -230,6 +358,10 @@ export async function getTenantMonthDue(
   billingMonthKey?: string
 ): Promise<MonthlyDuesLedgerRow | null> {
   if (!tenancyId) return null;
-  const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
-  return summary.rows.find((row) => row.tenancyId === tenancyId) ?? null;
+  const monthKey = billingMonthKey?.trim();
+  const summary = await getMonthlyDuesSummary(supabase, monthKey);
+  const found = summary.rows.find((row) => row.tenancyId === tenancyId);
+  if (found) return found;
+  if (!monthKey) return null;
+  return getTenancyMonthlyDueRow(supabase, tenancyId, monthKey);
 }

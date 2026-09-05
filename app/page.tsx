@@ -53,7 +53,7 @@ export default function HomePage() {
           </nav>
 
           <a
-            href="#contact"
+            href="/enquire"
             className="rounded-full bg-emerald-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-400"
           >
             Enquire Now
@@ -100,6 +100,12 @@ export default function HomePage() {
                 className="rounded-full border border-white/30 bg-white/10 px-7 py-3.5 font-semibold text-white backdrop-blur transition hover:bg-white/20"
               >
                 View Gallery
+              </a>
+              <a
+                href="/enquire"
+                className="rounded-full border border-white/30 bg-white/10 px-7 py-3.5 font-semibold text-white backdrop-blur transition hover:bg-white/20"
+              >
+                Enquire
               </a>
               <a
                 href="/pay"
@@ -298,7 +304,13 @@ export default function HomePage() {
                 <MapPin size={19} /> Get Directions
               </a>
 
-              <a href={`tel:+${WHATSAPP_BUSINESS_PHONE_E164}`} className="flex items-center gap-2 rounded-full bg-white px-7 py-3.5 font-semibold text-emerald-800">
+              <a
+                href="/enquire"
+                className="flex items-center gap-2 rounded-full bg-white px-7 py-3.5 font-semibold text-emerald-800"
+              >
+                <MessageCircle size={19} /> Enquire
+              </a>
+              <a href={`tel:+${WHATSAPP_BUSINESS_PHONE_E164}`} className="flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-7 py-3.5 font-semibold text-white">
                 <Phone size={19} /> Call Now
               </a>
               <a href={`https://wa.me/${WHATSAPP_BUSINESS_PHONE_E164}?text=Hi%2C%20I%27m%20interested%20in%20renting%20a%20flat%20at%20Dendukuri%27s%20Residences.%20Please%20share%20the%20current%20availability.`} className="flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-7 py-3.5 font-semibold text-white">

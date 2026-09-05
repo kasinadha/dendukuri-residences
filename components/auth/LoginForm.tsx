@@ -165,6 +165,16 @@ export default function LoginForm() {
           Pay without login
         </a>
       </p>
+
+      <p className="mt-3 text-center text-sm text-slate-500">
+        New tenant?{" "}
+        <a
+          href="/help"
+          className="font-semibold text-emerald-700 hover:text-emerald-800"
+        >
+          Read the help guide
+        </a>
+      </p>
     </div>
   );
 }

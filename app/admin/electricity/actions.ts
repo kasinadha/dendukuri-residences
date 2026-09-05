@@ -5,9 +5,10 @@ import { requireAdmin } from "@/lib/auth";
 import {
   createElectricityBillingRun,
   createElectricityReading,
+  getLastBuildingMeterReading,
+  getLastReadingsByFlatId,
   listFlatsForElectricityBilling,
   listFlatsForSelect,
-  getLastReadingsByFlatId,
 } from "@/lib/electricity";
 
 function asString(formData: FormData, key: string): string {
@@ -122,11 +123,14 @@ export async function fetchFlatsForElectricityBillingAction(
     return { ok: false as const, error: "Invalid billing month." };
   }
 
-  const [flats, allFlats, lastReadingsByFlatId] = await Promise.all([
-    listFlatsForElectricityBilling(supabase, billingMonthKey),
-    listFlatsForSelect(supabase),
-    getLastReadingsByFlatId(supabase),
-  ]);
+  const [flats, allFlats, lastReadingsByFlatId, lastBuildingC, lastBuildingD] =
+    await Promise.all([
+      listFlatsForElectricityBilling(supabase, billingMonthKey),
+      listFlatsForSelect(supabase),
+      getLastReadingsByFlatId(supabase),
+      getLastBuildingMeterReading(supabase, "C"),
+      getLastBuildingMeterReading(supabase, "D"),
+    ]);
 
   return {
     ok: true as const,
@@ -134,5 +138,6 @@ export async function fetchFlatsForElectricityBillingAction(
     allFlats,
     billingMonthKey,
     lastReadingsByFlatId,
+    lastBuildingReadings: { C: lastBuildingC, D: lastBuildingD },
   };
 }

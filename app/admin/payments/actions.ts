@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
-import { appendDuesBreakdownToNotes } from "@/lib/dues-breakdown";
+import { getTenantMonthDue } from "@/lib/reminders";
+import {
+  appendDuesBreakdownToNotes,
+  applyAdditionalPaymentToBreakdown,
+} from "@/lib/dues-breakdown";
 import {
   approvePaymentSubmission,
   rejectPaymentSubmission,
@@ -21,7 +25,9 @@ import {
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
 import { voidPaymentRecord } from "@/lib/void-payment";
-import { getTenancyDuesBreakdown } from "@/lib/public-pay-dues";
+import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
+import { reclassifyPaymentAsDeposit } from "@/lib/deposits";
+import { incrementTenancyDepositPaid } from "@/lib/tenants";
 
 export type RecordPaymentResult =
   | {
@@ -54,6 +60,8 @@ export async function approvePaymentSubmissionAction(formData: FormData) {
     revalidatePath("/admin/receipts");
     revalidatePath("/admin");
     revalidatePath("/admin/reports");
+    revalidatePath("/admin/accounts");
+    revalidatePath("/admin/tenants");
     revalidatePath("/tenant/receipts");
     revalidatePath("/tenant/pay");
     revalidatePath("/tenant");
@@ -90,7 +98,7 @@ export async function fetchTenancyDuesBreakdownAction(formData: FormData) {
     return { ok: false as const, error: "Billing month is invalid." };
   }
 
-  return getTenancyDuesBreakdown(supabase, {
+  return getTenancyDuesBreakdownWithArrears(supabase, {
     tenancyId,
     flatId,
     billingMonthKey: billingMonth,
@@ -111,6 +119,8 @@ export async function recordRentPayment(
   const transactionReference = asString(formData, "transaction_reference");
   const notes = asString(formData, "notes");
   const waived = asString(formData, "waived") === "1";
+  const paymentCategory = asString(formData, "payment_category") || "dues";
+  const isDeposit = paymentCategory === "deposit";
   const explicitReceiverAccountId =
     asString(formData, "receiver_account_id") || null;
 
@@ -140,11 +150,14 @@ export async function recordRentPayment(
   const { tenancy } = tenancyResult;
 
   if (!isActiveTenancyStatus(tenancy.status)) {
-    return {
-      ok: false,
-      error:
-        "Only ACTIVE tenancies can have rent recorded. Confirmed/reserved flats (e.g. D201 before move-in) are excluded.",
-    };
+    const monthDue = await getTenantMonthDue(supabase, tenancyId, billingMonth);
+    if (!monthDue || monthDue.outstanding <= 0) {
+      return {
+        ok: false,
+        error:
+          "This tenancy is closed and has no outstanding dues for the selected month.",
+      };
+    }
   }
 
   const status = waived
@@ -152,11 +165,24 @@ export async function recordRentPayment(
     : computePaymentStatus(amountDue, amountPaid);
 
   const flat = unwrapFlat(tenancy.flats);
-  const breakdownResult = await getTenancyDuesBreakdown(supabase, {
-    tenancyId,
-    flatId: flat?.id ?? "",
-    billingMonthKey: billingMonth,
-  });
+  const duesBreakdown =
+    !isDeposit && !waived
+      ? await (async () => {
+          const breakdownResult = await getTenancyDuesBreakdownWithArrears(
+            supabase,
+            {
+              tenancyId,
+              flatId: flat?.id ?? "",
+              billingMonthKey: billingMonth,
+            }
+          );
+          if (!breakdownResult.ok) return null;
+          return applyAdditionalPaymentToBreakdown(
+            breakdownResult.breakdown,
+            amountPaid
+          );
+        })()
+      : null;
 
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId: explicitReceiverAccountId,
@@ -172,13 +198,19 @@ export async function recordRentPayment(
     amount_paid: waived ? 0 : amountPaid,
     amount_due: amountDue,
     payment_mode: paymentMode,
-    payment_type: "rent",
+    payment_type: isDeposit ? "advance" : "rent",
     transaction_reference: transactionReference || null,
     status,
-    notes: appendDuesBreakdownToNotes(
-      encodeBillingMonthNote(billingMonth, notes || undefined),
-      breakdownResult.ok ? breakdownResult.breakdown : null
-    ),
+    notes: isDeposit
+      ? encodeBillingMonthNote(
+          billingMonth,
+          [notes || null, "Deposit / advance payment"].filter(Boolean).join("\n") ||
+            undefined
+        )
+      : appendDuesBreakdownToNotes(
+          encodeBillingMonthNote(billingMonth, notes || undefined),
+          duesBreakdown
+        ),
   };
 
   if (receiverAccountId) {
@@ -190,6 +222,18 @@ export async function recordRentPayment(
     return { ok: false, error: paymentResult.error };
   }
   const paymentId = paymentResult.paymentId;
+
+  if (isDeposit && !waived) {
+    const depositUpdate = await incrementTenancyDepositPaid(supabase, {
+      tenancyId,
+      amount: amountPaid,
+      paymentDate,
+    });
+    if (!depositUpdate.ok) {
+      await supabase.from("payments").delete().eq("id", paymentId);
+      return { ok: false, error: depositUpdate.error };
+    }
+  }
 
   // Receipt only when money was collected (or waived acknowledgement)
   if (!waived && amountPaid <= 0) {
@@ -210,6 +254,8 @@ export async function recordRentPayment(
     revalidatePath("/admin/receipts");
     revalidatePath("/admin");
     revalidatePath("/admin/reports");
+    revalidatePath("/admin/accounts");
+    revalidatePath("/admin/tenants");
     revalidatePath("/tenant/receipts");
 
     return {
@@ -235,10 +281,20 @@ function revalidateAfterPaymentChange() {
   revalidatePath("/admin/receipts");
   revalidatePath("/admin");
   revalidatePath("/admin/reports");
+  revalidatePath("/admin/accounts");
   revalidatePath("/admin/tenants");
   revalidatePath("/tenant/receipts");
   revalidatePath("/tenant/pay");
   revalidatePath("/tenant");
+}
+
+export async function reclassifyPaymentAsDepositAction(paymentId: string) {
+  const { supabase } = await requireAdmin();
+  const result = await reclassifyPaymentAsDeposit(supabase, paymentId);
+  if (result.ok) {
+    revalidateAfterPaymentChange();
+  }
+  return result;
 }
 
 export async function voidPaymentAction(formData: FormData) {

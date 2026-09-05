@@ -1,13 +1,135 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DuesBreakdown, DuesBreakdownLine } from "@/lib/dues-breakdown";
-import { parseDuesBreakdownFromNotes } from "@/lib/dues-breakdown";
-import { listElectricityReadings } from "@/lib/electricity";
+import type {
+  ArrearsMonthBreakdown,
+  DuesBreakdown,
+  DuesBreakdownLine,
+  DuesCategoryBreakdown,
+} from "@/lib/dues-breakdown";
+import {
+  allocatePaymentsAcrossLines,
+  applyAdditionalPaymentToBreakdown,
+  categoryTotalsFromBreakdown,
+  computeBreakdownTotals,
+  parseDuesBreakdownFromNotes,
+  resetBreakdownForAllocation,
+} from "@/lib/dues-breakdown";
 import { getTenantMonthDue } from "@/lib/reminders";
+import { formatBillingMonthLabel } from "@/lib/receipts";
+import { firstMonthlyBillingMonthKey } from "@/lib/rent-billing-month";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { MonthlyDuesLedgerRow } from "@/lib/monthly-dues";
 
-function num(value: unknown): number {
-  const n = typeof value === "string" ? Number(value) : Number(value);
-  return Number.isFinite(n) ? n : 0;
+function priorBillingMonthKeys(upToMonthKey: string, count = 1): string[] {
+  const match = /^(\d{4})-(\d{2})$/.exec(upToMonthKey);
+  if (!match) return [];
+  let year = Number(match[1]);
+  let month = Number(match[2]);
+  const keys: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    month -= 1;
+    if (month < 1) {
+      month = 12;
+      year -= 1;
+    }
+    keys.push(`${year}-${String(month).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function buildLinesFromMonthDue(monthDue: MonthlyDuesLedgerRow): DuesBreakdownLine[] {
+  const lines: DuesBreakdownLine[] = [];
+
+  if (monthDue.rentDue > 0) {
+    lines.push({
+      key: "rent",
+      label: "Rent",
+      due: monthDue.rentDue,
+      paid: 0,
+      outstanding: monthDue.rentDue,
+    });
+  }
+  if (monthDue.maintenanceCharge > 0) {
+    lines.push({
+      key: "maintenance",
+      label: "Maintenance",
+      due: monthDue.maintenanceCharge,
+      paid: 0,
+      outstanding: monthDue.maintenanceCharge,
+    });
+  }
+  if (monthDue.carParkingCharge > 0) {
+    lines.push({
+      key: "parking",
+      label: "Car parking",
+      due: monthDue.carParkingCharge,
+      paid: 0,
+      outstanding: monthDue.carParkingCharge,
+    });
+  }
+  if (monthDue.washingMachineCharge > 0) {
+    lines.push({
+      key: "washer",
+      label: "Washing machine",
+      due: monthDue.washingMachineCharge,
+      paid: 0,
+      outstanding: monthDue.washingMachineCharge,
+    });
+  }
+  if (monthDue.otherMonthlyCharge > 0) {
+    lines.push({
+      key: "other",
+      label: monthDue.otherChargesNotes?.trim() || "Other monthly",
+      due: monthDue.otherMonthlyCharge,
+      paid: 0,
+      outstanding: monthDue.otherMonthlyCharge,
+    });
+  }
+  if (monthDue.finesCharge > 0) {
+    lines.push({
+      key: "fines",
+      label: "Fines",
+      due: monthDue.finesCharge,
+      paid: 0,
+      outstanding: monthDue.finesCharge,
+    });
+  }
+  if (monthDue.electricityCharge > 0) {
+    lines.push({
+      key: "electricity",
+      label: "Electricity",
+      due: monthDue.electricityCharge,
+      paid: 0,
+      outstanding: monthDue.electricityCharge,
+    });
+  }
+
+  allocatePaymentsAcrossLines(lines, monthDue.amountPaid);
+  return lines;
+}
+
+function buildBreakdownFromMonthDue(
+  monthDue: MonthlyDuesLedgerRow,
+  billingMonthKey: string,
+  infoMessage?: string
+): DuesBreakdown {
+  const lines = buildLinesFromMonthDue(monthDue);
+  const { totalDue, totalPaid, totalOutstanding } = computeBreakdownTotals(lines);
+  return {
+    billingMonthKey,
+    lines,
+    totalDue,
+    totalPaid,
+    totalOutstanding,
+    infoMessage,
+  };
+}
+
+async function loadMonthDueForTenancy(
+  supabase: SupabaseClient,
+  tenancyId: string,
+  billingMonthKey: string
+): Promise<MonthlyDuesLedgerRow | null> {
+  return getTenantMonthDue(supabase, tenancyId, billingMonthKey);
 }
 
 export async function verifyPublicPayTenantPhone(
@@ -60,108 +182,94 @@ export async function getTenancyDuesBreakdown(
     billingMonthKey: string;
   }
 ): Promise<{ ok: true; breakdown: DuesBreakdown } | { ok: false; error: string }> {
-  const monthDue = await getTenantMonthDue(
+  const monthDue = await loadMonthDueForTenancy(
     supabase,
     input.tenancyId,
     input.billingMonthKey
   );
 
   if (!monthDue) {
-    return { ok: false, error: "No active tenancy dues found for this period." };
+    return { ok: false, error: "No tenancy dues found for this period." };
   }
 
-  const lines: DuesBreakdownLine[] = [];
+  let infoMessage: string | undefined;
+  if (
+    monthDue.totalDue === 0 &&
+    monthDue.outstanding === 0 &&
+    monthDue.startDate
+  ) {
+    const firstDue = firstMonthlyBillingMonthKey(monthDue.startDate);
+    if (
+      firstDue &&
+      input.billingMonthKey < firstDue
+    ) {
+      infoMessage = `No dues for this month. First rent is due ${formatBillingMonthLabel(firstDue)}.`;
+    }
+  }
 
-  if (monthDue.rentDue > 0) {
-    lines.push({
-      key: "rent",
-      label: "Rent",
-      due: monthDue.rentDue,
-      paid: monthDue.rentPaid,
-      outstanding: Math.max(0, monthDue.rentDue - monthDue.rentPaid),
+  return {
+    ok: true,
+    breakdown: buildBreakdownFromMonthDue(
+      monthDue,
+      input.billingMonthKey,
+      infoMessage
+    ),
+  };
+}
+
+/** Current month breakdown plus outstanding from the prior billing month only. */
+export async function getTenancyDuesBreakdownWithArrears(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    flatId: string;
+    billingMonthKey: string;
+  }
+): Promise<{ ok: true; breakdown: DuesBreakdown } | { ok: false; error: string }> {
+  const current = await getTenancyDuesBreakdown(supabase, input);
+  if (!current.ok) return current;
+
+  const arrears: ArrearsMonthBreakdown[] = [];
+  for (const monthKey of priorBillingMonthKeys(input.billingMonthKey, 1)) {
+    const monthDue = await loadMonthDueForTenancy(
+      supabase,
+      input.tenancyId,
+      monthKey
+    );
+    if (!monthDue || monthDue.outstanding <= 0) continue;
+
+    const lines = buildLinesFromMonthDue(monthDue).filter(
+      (line) => line.outstanding > 0
+    );
+    if (lines.length === 0) continue;
+
+    arrears.push({
+      billingMonthKey: monthKey,
+      billingMonthLabel: formatBillingMonthLabel(monthKey),
+      lines: lines.map((line) => ({
+        ...line,
+        isArrears: true,
+        arrearsMonthKey: monthKey,
+        label: `${line.label} (${formatBillingMonthLabel(monthKey)})`,
+      })),
+      totalOutstanding: lines.reduce((sum, line) => sum + line.outstanding, 0),
     });
   }
 
-  if (monthDue.maintenanceCharge > 0) {
-    lines.push({
-      key: "maintenance",
-      label: "Maintenance",
-      due: monthDue.maintenanceCharge,
-      paid: 0,
-      outstanding: monthDue.maintenanceCharge,
-    });
-  }
-
-  if (monthDue.carParkingCharge > 0) {
-    lines.push({
-      key: "parking",
-      label: "Car parking",
-      due: monthDue.carParkingCharge,
-      paid: 0,
-      outstanding: monthDue.carParkingCharge,
-    });
-  }
-
-  if (monthDue.washingMachineCharge > 0) {
-    lines.push({
-      key: "washer",
-      label: "Washing machine",
-      due: monthDue.washingMachineCharge,
-      paid: 0,
-      outstanding: monthDue.washingMachineCharge,
-    });
-  }
-
-  if (monthDue.otherMonthlyCharge > 0) {
-    lines.push({
-      key: "other",
-      label: monthDue.otherChargesNotes?.trim() || "Other monthly",
-      due: monthDue.otherMonthlyCharge,
-      paid: 0,
-      outstanding: monthDue.otherMonthlyCharge,
-    });
-  }
-
-  const electricityRows = await listElectricityReadings(supabase, {
-    flatId: input.flatId,
-    limit: 12,
-  });
-  const electricity = electricityRows.find(
-    (row) => row.billingMonth === input.billingMonthKey && num(row.billAmount) > 0
+  const arrearsTotal = arrears.reduce(
+    (sum, month) => sum + month.totalOutstanding,
+    0
   );
-
-  if (electricity && num(electricity.billAmount) > 0) {
-    const bill = num(electricity.billAmount);
-    lines.push({
-      key: "electricity",
-      label: "Electricity",
-      due: bill,
-      paid: 0,
-      outstanding: bill,
-    });
-  }
-
-  let chargesPaidLeft = monthDue.chargesPaid;
-  for (const line of lines) {
-    if (line.key === "rent" || line.key === "electricity") continue;
-    const paid = Math.min(line.due, chargesPaidLeft);
-    line.paid = paid;
-    line.outstanding = Math.max(0, line.due - paid);
-    chargesPaidLeft -= paid;
-  }
-
-  const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
-  const totalPaid = lines.reduce((sum, line) => sum + line.paid, 0);
-  const totalOutstanding = Math.max(0, monthDue.outstanding);
+  const priorMonth = arrears[0];
 
   return {
     ok: true,
     breakdown: {
-      billingMonthKey: input.billingMonthKey,
-      lines,
-      totalDue,
-      totalPaid,
-      totalOutstanding,
+      ...current.breakdown,
+      arrears,
+      grandTotalOutstanding: current.breakdown.totalOutstanding + arrearsTotal,
+      priorMonthLabel: priorMonth?.billingMonthLabel,
+      priorMonthArrearsTotal: arrearsTotal > 0 ? arrearsTotal : undefined,
     },
   };
 }
@@ -173,10 +281,10 @@ export async function getPublicPayDuesBreakdown(input: {
 }): Promise<{ ok: true; breakdown: DuesBreakdown } | { ok: false; error: string }> {
   const admin = createAdminClient();
   if (!admin.ok) return { ok: false, error: admin.error };
-  return getTenancyDuesBreakdown(admin.client, input);
+  return getTenancyDuesBreakdownWithArrears(admin.client, input);
 }
 
-/** Use stored breakdown on payment notes, or compute from tenancy for older receipts. */
+/** Recompute breakdown from ledger + bills; fall back to stored notes if needed. */
 export async function resolveReceiptDuesBreakdown(
   supabase: SupabaseClient,
   input: {
@@ -186,20 +294,16 @@ export async function resolveReceiptDuesBreakdown(
     billingMonthKey: string | null;
   }
 ): Promise<DuesBreakdown | null> {
-  const stored = parseDuesBreakdownFromNotes(input.notes);
-  if (stored) return stored;
-
-  if (!input.tenancyId || !input.flatId || !input.billingMonthKey) {
-    return null;
+  if (input.tenancyId && input.flatId && input.billingMonthKey) {
+    const computed = await getTenancyDuesBreakdown(supabase, {
+      tenancyId: input.tenancyId,
+      flatId: input.flatId,
+      billingMonthKey: input.billingMonthKey,
+    });
+    if (computed.ok) return computed.breakdown;
   }
 
-  const computed = await getTenancyDuesBreakdown(supabase, {
-    tenancyId: input.tenancyId,
-    flatId: input.flatId,
-    billingMonthKey: input.billingMonthKey,
-  });
-
-  return computed.ok ? computed.breakdown : null;
+  return parseDuesBreakdownFromNotes(input.notes);
 }
 
 export function parseDuesBreakdownJson(raw: string): DuesBreakdown | null {
@@ -211,4 +315,43 @@ export function parseDuesBreakdownJson(raw: string): DuesBreakdown | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Split collected dues into rent / electricity / other by re-applying payments
+ * against the live dues structure (includes electricity billing for the month).
+ */
+export async function computeCollectedCategoryBreakdownForTenancy(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    flatId: string;
+    billingMonthKey: string;
+    payments: Array<{ amount: number; paymentDate: string }>;
+  }
+): Promise<DuesCategoryBreakdown> {
+  const sorted = [...input.payments].sort((a, b) =>
+    a.paymentDate.localeCompare(b.paymentDate)
+  );
+  const totalPaid = sorted.reduce((sum, payment) => sum + payment.amount, 0);
+  if (totalPaid <= 0) {
+    return { rent: 0, electricity: 0, other: 0 };
+  }
+
+  const dues = await getTenancyDuesBreakdownWithArrears(supabase, {
+    tenancyId: input.tenancyId,
+    flatId: input.flatId,
+    billingMonthKey: input.billingMonthKey,
+  });
+
+  if (!dues.ok) {
+    return { rent: totalPaid, electricity: 0, other: 0 };
+  }
+
+  let breakdown = resetBreakdownForAllocation(dues.breakdown);
+  for (const payment of sorted) {
+    breakdown = applyAdditionalPaymentToBreakdown(breakdown, payment.amount);
+  }
+
+  return categoryTotalsFromBreakdown(breakdown);
 }

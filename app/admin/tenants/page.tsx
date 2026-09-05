@@ -1,15 +1,18 @@
 import Link from "next/link";
 import AdminLayout from "@/components/admin/AdminLayout";
 import FormerTenantActions from "@/components/admin/FormerTenantActions";
+import SyncMoveInDatesButton from "@/components/admin/SyncMoveInDatesButton";
 import TenantDetailsEditor from "@/components/admin/TenantDetailsEditor";
 import TenantLoginActions from "@/components/admin/TenantLoginActions";
 import TenantOccupancyActions from "@/components/admin/TenantOccupancyActions";
+import NameChangeRequestsPanel from "@/components/admin/NameChangeRequestsPanel";
 import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
 import { buildTenantDuplicateMergeMap } from "@/lib/tenant-duplicates";
 import { listUnpaidRentReminders } from "@/lib/reminders";
+import { listPendingNameChangeRequests } from "@/lib/tenant-change-requests";
 
 export default async function TenantsPage({
   searchParams,
@@ -21,10 +24,11 @@ export default async function TenantsPage({
   const showFormer = params.show === "former" || params.show === "all";
   const showArchived = params.show === "archived";
 
-  const [tenants, flats, unpaidDues] = await Promise.all([
+  const [tenants, flats, unpaidDues, nameChanges] = await Promise.all([
     listTenantsForAdmin(supabase),
     listFlatsForAdmin(supabase),
     listUnpaidRentReminders(supabase),
+    listPendingNameChangeRequests(supabase),
   ]);
 
   const nonArchivedTenants = tenants.filter((t) => !t.isArchived);
@@ -55,9 +59,9 @@ export default async function TenantsPage({
             Tenants
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Active tenants with linked flat, rent, monthly charges, and
-            advance/deposit. Contact details are freely editable; rent, charges,
-            and advance are locked and need confirmation to change.
+            Active tenants with linked flat, rent, monthly charges, move-in date,
+            and advance/deposit. Contact details are freely editable; rent,
+            charges, and advance are locked and need confirmation to change.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -150,6 +154,8 @@ export default async function TenantsPage({
         </div>
       ) : null}
 
+      <NameChangeRequestsPanel rows={nameChanges} />
+
       {unpaidDues.rows.length > 0 ? (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
           <p className="font-semibold text-amber-950">
@@ -167,6 +173,10 @@ export default async function TenantsPage({
           </p>
         </div>
       ) : null}
+
+      <div className="mt-6">
+        <SyncMoveInDatesButton />
+      </div>
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {listedTenants.length === 0 ? (
@@ -334,7 +344,9 @@ export default async function TenantsPage({
                       }`}
                     >
                       {tenant.hasActiveTenancy
-                        ? tenant.tenancyStatus ?? "active"
+                        ? tenant.moveInDate
+                          ? `moved in ${formatDisplayDate(tenant.moveInDate)}`
+                          : tenant.tenancyStatus ?? "active"
                         : tenant.vacatedDate
                           ? `vacated · ${formatDisplayDate(tenant.vacatedDate)}`
                           : tenant.tenancyStatus ?? "former"}
@@ -388,9 +400,12 @@ export default async function TenantsPage({
                       depositAmount={tenant.depositAmount}
                       depositPaid={tenant.depositPaid}
                       depositPaidDate={tenant.depositPaidDate}
+                      depositReturned={tenant.depositReturned}
+                      depositReturnedDate={tenant.depositReturnedDate}
                       monthlyCharges={tenant.monthlyCharges}
                       tenancyId={tenant.tenancyId}
                       hasActiveTenancy={tenant.hasActiveTenancy}
+                      moveInDate={tenant.moveInDate}
                     />
                   </div>
                 </li>

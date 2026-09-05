@@ -3,6 +3,7 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import OwnerDuesRemindersPanel from "@/components/admin/OwnerDuesRemindersPanel";
 import PaymentSubmissionsPanel from "@/components/admin/PaymentSubmissionsPanel";
 import PaymentVoidButton from "@/components/admin/PaymentVoidButton";
+import ReclassifyDepositButton from "@/components/admin/ReclassifyDepositButton";
 import RecordPaymentForm, {
   type TenancyOption,
 } from "@/components/admin/RecordPaymentForm";
@@ -26,8 +27,10 @@ import {
   listUnpaidRentReminders,
 } from "@/lib/reminders";
 import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
+import { getMonthlyDepositsCollected } from "@/lib/building-revenue";
 import { listPaymentHistory } from "@/lib/rent-month";
 import { getWhatsAppBusinessConfig } from "@/lib/whatsapp";
+import { currentBillingMonthKey } from "@/lib/rent-upi";
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
@@ -72,6 +75,9 @@ export default async function PaymentsPage({ searchParams }: Props) {
       id,
       status,
       monthly_rent,
+      deposit_amount,
+      deposit_paid,
+      security_deposit,
       tenants ( full_name ),
       flats ( id, flat_number, upi_id, upi_qr_url, payment_account_id )
     `
@@ -80,9 +86,13 @@ export default async function PaymentsPage({ searchParams }: Props) {
 
   const whatsapp = getWhatsAppBusinessConfig();
 
-  const [monthSummary, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
+  const [monthSummary, depositsCollected, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
     await Promise.all([
       getMonthlyDuesSummary(supabase, month),
+      getMonthlyDepositsCollected(
+        supabase,
+        month ?? currentBillingMonthKey()
+      ),
       listPaymentHistory(supabase, {
         month,
         flat,
@@ -100,8 +110,18 @@ export default async function PaymentsPage({ searchParams }: Props) {
 
   const accountOptions = toPaymentAccountOptions(paymentAccounts);
 
+  const outstandingTenancyIds = new Set(
+    monthSummary.rows
+      .filter((row) => row.outstanding > 0 && row.status !== "waived")
+      .map((row) => row.tenancyId)
+  );
+
   const tenancyOptions: TenancyOption[] = (tenancyRows ?? [])
-    .filter((row) => isActiveTenancyStatus(row.status))
+    .filter(
+      (row) =>
+        isActiveTenancyStatus(row.status) ||
+        outstandingTenancyIds.has(row.id as string)
+    )
     .map((row) => {
       const tenantRow = unwrapOne(row.tenants);
       const flatRow = unwrapOne(row.flats);
@@ -112,17 +132,33 @@ export default async function PaymentsPage({ searchParams }: Props) {
         upiQrUrl: flatRow?.upi_qr_url,
         buildingWing: buildingWingFromFlatNumber(flatRow?.flat_number),
       });
+      const vacated = !isActiveTenancyStatus(row.status);
+      const flatNumber = flatRow?.flat_number?.trim() || "—";
+      const tenantName = tenantRow?.full_name?.trim() || "Tenant";
+      const depositAmount =
+        row.deposit_amount != null
+          ? Number(row.deposit_amount)
+          : row.security_deposit != null
+            ? Number(row.security_deposit)
+            : null;
+      const depositPaid =
+        row.deposit_paid != null ? Number(row.deposit_paid) : null;
       return {
         id: row.id,
         flatId: flatRow?.id ?? "",
-        flatNumber: flatRow?.flat_number?.trim() || "—",
-        tenantName: tenantRow?.full_name?.trim() || "Tenant",
+        flatNumber,
+        tenantName,
         monthlyRent: Number.isFinite(rent) ? rent : null,
-        label: `Flat ${flatRow?.flat_number ?? "?"} — ${tenantRow?.full_name ?? "Tenant"}`,
+        depositAmount: Number.isFinite(depositAmount) ? depositAmount : null,
+        depositPaid: Number.isFinite(depositPaid) ? depositPaid : null,
+        label: `Flat ${flatNumber} — ${tenantName}${vacated ? " (vacated)" : ""}`,
         suggestedReceiverAccountId:
           flatRow?.payment_account_id ?? suggested?.id ?? null,
       };
     });
+
+  const recordTenancyId =
+    typeof params.record_tenancy === "string" ? params.record_tenancy : undefined;
 
   const filterMonth = month ?? monthSummary.billingMonthKey;
 
@@ -135,9 +171,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
             Rent & Payments
           </h2>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Record collections against active tenancies, track status, and
-            issue unique receipts. Confirmed/reserved units are excluded until
-            move-in.
+            Record collections against active tenancies (and vacated tenants
+            with final-month dues). Issue unique receipts automatically.
           </p>
         </div>
         <a
@@ -158,12 +193,17 @@ export default async function PaymentsPage({ searchParams }: Props) {
           {
             title: "Dues expected",
             value: formatInr(monthSummary.totalExpected),
-            detail: "Rent + monthly charges",
+            detail: "Rent + monthly charges + electricity",
           },
           {
-            title: "Collected",
+            title: "Dues collected",
             value: formatInr(monthSummary.totalCollected),
             detail: `${monthSummary.paidTenants} paid · ${monthSummary.partialTenants} partial`,
+          },
+          {
+            title: "Deposits collected",
+            value: formatInr(depositsCollected),
+            detail: "Advance/deposit payments this month only",
           },
           {
             title: "Outstanding",
@@ -192,7 +232,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+      <div className="mt-8">
         <UnpaidRentRemindersPanel
           billingMonthKey={unpaidReminders.billingMonthKey}
           billingMonthLabel={unpaidReminders.billingMonthLabel}
@@ -200,6 +240,9 @@ export default async function PaymentsPage({ searchParams }: Props) {
           whatsappBusinessPhone={whatsapp.businessPhoneDisplay}
           whatsappApiEnabled={whatsapp.apiEnabled}
         />
+      </div>
+
+      <div className="mt-8">
         <OwnerDuesRemindersPanel items={ownerDues} />
       </div>
 
@@ -214,6 +257,8 @@ export default async function PaymentsPage({ searchParams }: Props) {
         <RecordPaymentForm
           tenancies={tenancyOptions}
           accounts={accountOptions}
+          defaultTenancyId={recordTenancyId}
+          defaultBillingMonth={filterMonth}
         />
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -222,7 +267,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
               Month ledger — {monthSummary.billingMonthLabel}
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Per active tenancy for the selected month.
+              Active and vacated tenancies billed for the selected month.
             </p>
           </div>
           {monthSummary.rows.length === 0 ? (
@@ -243,8 +288,16 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     <p className="mt-1 text-sm text-slate-500">
                       Due {formatInr(row.totalDue)} · Paid{" "}
                       {formatInr(row.amountPaid)}
-                      {row.chargesDue > 0
-                        ? ` (rent ${formatInr(row.rentDue)} + charges ${formatInr(row.chargesDue)})`
+                      {row.chargesDue > 0 || row.electricityCharge > 0
+                        ? ` (rent ${formatInr(row.rentDue)}${
+                            row.chargesDue > 0
+                              ? ` + charges ${formatInr(row.chargesDue)}`
+                              : ""
+                          }${
+                            row.electricityCharge > 0
+                              ? ` + electricity ${formatInr(row.electricityCharge)}`
+                              : ""
+                          })`
                         : ""}
                       {row.outstanding > 0
                         ? ` · Outstanding ${formatInr(row.outstanding)}`
@@ -259,6 +312,14 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     >
                       {paymentStatusLabel(row.status)}
                     </span>
+                    {row.outstanding > 0 && row.status !== "waived" ? (
+                      <Link
+                        href={`/admin/payments?month=${filterMonth}&record_tenancy=${row.tenancyId}#record-payment`}
+                        className="text-sm font-semibold text-emerald-700"
+                      >
+                        Record payment
+                      </Link>
+                    ) : null}
                     {row.lastReceiptId ? (
                       <Link
                         href={`/admin/receipts/${row.lastReceiptId}`}
@@ -344,6 +405,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
                       ? ` of ${formatInr(row.amountDue)}`
                       : ""}{" "}
                     · {formatDisplayDate(row.paymentDate)}
+                    {row.paymentType ? ` · ${row.paymentType}` : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -378,6 +440,13 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     amountPaidLabel={formatInr(row.amountPaid)}
                     receiptNumber={row.receiptNumber}
                   />
+                  {row.paymentType === "rent" ? (
+                    <ReclassifyDepositButton
+                      paymentId={row.paymentId}
+                      flatNumber={row.flatNumber}
+                      amountPaidLabel={formatInr(row.amountPaid)}
+                    />
+                  ) : null}
                 </div>
               </li>
             ))}

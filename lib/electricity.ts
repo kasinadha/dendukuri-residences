@@ -9,6 +9,7 @@ import {
   calculateCommonSharePerFlat,
   calculateFlatElectricityBill,
   DEFAULT_ELECTRICITY_BILLING_CONFIG,
+  roundElectricityDue,
   type ElectricityBillingConfig,
   type FlatElectricityBillBreakdown,
 } from "@/lib/electricity-billing";
@@ -293,7 +294,8 @@ function mapReadingRow(row: Record<string, unknown>): ElectricityReading {
       row.service_charge_amount == null
         ? null
         : num(row.service_charge_amount),
-    billAmount: row.bill_amount == null ? null : num(row.bill_amount),
+    billAmount:
+      row.bill_amount == null ? null : roundElectricityDue(num(row.bill_amount)),
     status: String(row.status ?? "recorded").trim() || "recorded",
     notes: (row.notes as string | null) ?? null,
     billingMonth: run?.billing_month ?? null,
@@ -539,20 +541,24 @@ export async function createElectricityBillingRun(
     .single();
 
   if (runError || !run) {
-    if (/electricity_billing_runs|does not exist/i.test(runError?.message ?? "")) {
+    const runMessage = runError?.message ?? "Could not save billing run.";
+    if (
+      /electricity_billing_runs|electricity_readings|building_wing|does not exist/i.test(
+        runMessage
+      )
+    ) {
       return {
         ok: false,
-        error:
-          "Run supabase/migrations/20260829_electricity_billing.sql and 20260830_electricity_building_wing.sql in Supabase SQL Editor.",
+        error: `Electricity billing tables are not ready (${runMessage}). Run supabase/migrations/20260830_electricity_billing_repair.sql in Supabase SQL Editor (or run 20260829_electricity_billing.sql then 20260830_electricity_building_wing.sql).`,
       };
     }
-    if (/unique|duplicate/i.test(runError?.message ?? "")) {
+    if (/unique|duplicate/i.test(runMessage)) {
       return {
         ok: false,
         error: `A billing run for Building ${input.buildingWing} already exists for this month and reading date.`,
       };
     }
-    return { ok: false, error: runError?.message ?? "Could not save billing run." };
+    return { ok: false, error: runMessage };
   }
 
   const readingRows = input.flats.map((flat) => {
@@ -615,7 +621,8 @@ export async function createElectricityReading(
       previous_reading: input.previousReading,
       current_reading: input.currentReading,
       flat_units: Math.max(0, input.currentReading - input.previousReading),
-      bill_amount: input.billAmount ?? null,
+      bill_amount:
+        input.billAmount == null ? null : roundElectricityDue(input.billAmount),
       status: input.status?.trim() || "recorded",
       notes: input.notes?.trim() || null,
     })
