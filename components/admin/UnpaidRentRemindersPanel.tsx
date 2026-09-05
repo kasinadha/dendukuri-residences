@@ -74,11 +74,16 @@ export default function UnpaidRentRemindersPanel({
   }
 
   function sendAll() {
+    if (sendableCount === 0) return;
     if (
       !window.confirm(
-        `Send WhatsApp reminders to ${sendableCount} tenant${
-          sendableCount === 1 ? "" : "s"
-        } with outstanding dues?`
+        whatsappApiEnabled
+          ? `Send WhatsApp reminders to ${sendableCount} tenant${
+              sendableCount === 1 ? "" : "s"
+            } with outstanding dues?`
+          : `Open WhatsApp drafts for ${sendableCount} tenant${
+              sendableCount === 1 ? "" : "s"
+            } with outstanding dues? Allow pop-ups if the browser asks, and stay logged into WhatsApp Web.`
       )
     ) {
       return;
@@ -86,6 +91,34 @@ export default function UnpaidRentRemindersPanel({
     setError("");
     setBulkMessage("");
     setPendingId("all");
+
+    if (!whatsappApiEnabled) {
+      const draftRows = rows.filter((row) => row.whatsappUrl);
+      startTransition(async () => {
+        let opened = 0;
+        for (const row of draftRows) {
+          if (!row.whatsappUrl) continue;
+          window.open(row.whatsappUrl, "_blank", "noopener,noreferrer");
+          opened += 1;
+          const formData = new FormData();
+          formData.set("tenancy_id", row.tenancyId);
+          formData.set("billing_month", billingMonthKey);
+          formData.set("channel", "whatsapp");
+          await markRentRemindedAction(formData);
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+        setPendingId(null);
+        const skipped = rows.length - draftRows.length;
+        setBulkMessage(
+          `Opened ${opened} WhatsApp draft${opened === 1 ? "" : "s"}.${
+            skipped > 0 ? ` Skipped ${skipped} without a mobile number.` : ""
+          }`
+        );
+        router.refresh();
+      });
+      return;
+    }
+
     const formData = new FormData();
     formData.set("billing_month", billingMonthKey);
     startTransition(async () => {
@@ -127,34 +160,32 @@ export default function UnpaidRentRemindersPanel({
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
-        <h3 className="text-lg font-bold text-slate-900">
-          Monthly dues unpaid · {billingMonthLabel}
-        </h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Rent plus maintenance, parking, washer, other monthly charges, fines,
-          and electricity. Move-in month has no dues; vacating tenants appear for
-          their final month only (set vacate date to close the account).
-          {whatsappApiEnabled
-            ? " Send directly from your business WhatsApp API, or open a draft in WhatsApp Web."
-            : " Open WhatsApp with a pre-filled message, then mark reminded."}
-        </p>
-        {whatsappApiEnabled && rows.length > 0 ? (
-          <button
-            type="button"
-            disabled={pending || sendableCount === 0}
-            onClick={sendAll}
-            className="mt-3 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            {pending && pendingId === "all"
-              ? "Sending…"
-              : `Send reminders (${sendableCount})`}
-          </button>
-        ) : rows.length > 0 && !whatsappApiEnabled ? (
-          <p className="mt-3 text-xs text-slate-500">
-            Bulk send needs WhatsApp Cloud API. Use per-row drafts until it is
-            configured.
-          </p>
-        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">
+              Monthly dues unpaid · {billingMonthLabel}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Rent plus maintenance, parking, washer, other monthly charges, fines,
+              and electricity. Move-in month has no dues; vacating tenants appear for
+              their final month only (set vacate date to close the account).
+            </p>
+          </div>
+          {rows.length > 0 ? (
+            <button
+              type="button"
+              disabled={pending || sendableCount === 0}
+              onClick={sendAll}
+              className="shrink-0 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {pending && pendingId === "all"
+                ? whatsappApiEnabled
+                  ? "Sending…"
+                  : "Opening…"
+                : `Send reminders (${sendableCount})`}
+            </button>
+          ) : null}
+        </div>
         <p className="mt-2 text-xs text-slate-600">
           Send from business WhatsApp{" "}
           <span className="font-semibold">{whatsappBusinessPhone}</span>

@@ -232,7 +232,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+      <div className="mt-8">
         <UnpaidRentRemindersPanel
           billingMonthKey={unpaidReminders.billingMonthKey}
           billingMonthLabel={unpaidReminders.billingMonthLabel}
@@ -240,6 +240,9 @@ export default async function PaymentsPage({ searchParams }: Props) {
           whatsappBusinessPhone={whatsapp.businessPhoneDisplay}
           whatsappApiEnabled={whatsapp.apiEnabled}
         />
+      </div>
+
+      <div className="mt-8">
         <OwnerDuesRemindersPanel items={ownerDues} />
       </div>
 
