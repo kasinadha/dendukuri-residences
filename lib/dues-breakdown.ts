@@ -179,18 +179,103 @@ export function resetBreakdownForAllocation(
   };
 }
 
+export const EMPTY_DUES_CATEGORY_BREAKDOWN: DuesCategoryBreakdown = {
+  rent: 0,
+  electricity: 0,
+  other: 0,
+};
+
+function addCategoryAmount(
+  target: DuesCategoryBreakdown,
+  key: string,
+  amount: number
+): void {
+  if (amount <= 0) return;
+  if (key === "rent") target.rent += amount;
+  else if (key === "electricity") target.electricity += amount;
+  else target.other += amount;
+}
+
+export function addDuesCategoryBreakdown(
+  target: DuesCategoryBreakdown,
+  delta: DuesCategoryBreakdown
+): void {
+  target.rent += delta.rent;
+  target.electricity += delta.electricity;
+  target.other += delta.other;
+}
+
+function paidMapFromLines(lines: DuesBreakdownLine[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const line of lines) {
+    map.set(line.key, (map.get(line.key) ?? 0) + Math.max(0, line.paid));
+  }
+  return map;
+}
+
+function paidIncreaseMap(
+  before: Map<string, number>,
+  afterLines: DuesBreakdownLine[]
+): Map<string, number> {
+  const increase = new Map<string, number>();
+  const after = paidMapFromLines(afterLines);
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    const delta = Math.max(0, (after.get(key) ?? 0) - (before.get(key) ?? 0));
+    if (delta > 0) increase.set(key, delta);
+  }
+  return increase;
+}
+
+/** Take the latest rupees of a payment from paid-by-category (electricity last in, first out). */
+export function peelCategoriesFromPaidMap(
+  amount: number,
+  available: Map<string, number>
+): DuesCategoryBreakdown {
+  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_CATEGORY_BREAKDOWN };
+  let remaining = Math.max(0, Math.round(amount));
+  for (const key of [...DUES_LINE_ALLOCATION_ORDER].reverse()) {
+    if (remaining <= 0) break;
+    const take = Math.min(Math.max(0, available.get(key) ?? 0), remaining);
+    if (take <= 0) continue;
+    addCategoryAmount(totals, key, take);
+    remaining -= take;
+  }
+  if (remaining > 0) totals.rent += remaining;
+  return totals;
+}
+
+/** Current billing-month lines only — do not fold arrears into this month's split. */
+export function categoryTotalsFromCurrentMonthLines(
+  breakdown: DuesBreakdown
+): DuesCategoryBreakdown {
+  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_CATEGORY_BREAKDOWN };
+  for (const line of breakdown.lines) {
+    addCategoryAmount(totals, line.key, line.paid);
+  }
+  return totals;
+}
+
+function withoutArrears(breakdown: DuesBreakdown): DuesBreakdown {
+  const totals = computeBreakdownTotals(breakdown.lines);
+  return {
+    ...breakdown,
+    arrears: undefined,
+    totalDue: totals.totalDue,
+    totalPaid: totals.totalPaid,
+    totalOutstanding: totals.totalOutstanding,
+    grandTotalOutstanding: totals.totalOutstanding,
+    priorMonthArrearsTotal: undefined,
+  };
+}
+
 /** Sum paid amounts by rent / electricity / other (maintenance, parking, etc.). */
 export function categoryTotalsFromBreakdown(
   breakdown: DuesBreakdown
 ): DuesCategoryBreakdown {
   const combined = toCombinedBreakdownView(breakdown);
-  const totals: DuesCategoryBreakdown = { rent: 0, electricity: 0, other: 0 };
+  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_CATEGORY_BREAKDOWN };
   for (const line of combined.lines) {
-    const paid = line.paid;
-    if (paid <= 0) continue;
-    if (line.key === "rent") totals.rent += paid;
-    else if (line.key === "electricity") totals.electricity += paid;
-    else totals.other += paid;
+    addCategoryAmount(totals, line.key, line.paid);
   }
   return totals;
 }
@@ -217,6 +302,84 @@ export function parseDuesBreakdownFromNotes(
   } catch {
     return null;
   }
+}
+
+export type MonthAttributedPayment = {
+  amount: number;
+  paymentDate: string;
+  notes: string | null;
+  id?: string;
+};
+
+/**
+ * Split this month's collected cash into rent / electricity / other.
+ * Uses each payment's stored dues snapshot (current-month line increases) so a
+ * follow-up electricity payment is not re-applied as rent. Falls back to a
+ * current-month waterfall when a snapshot is missing.
+ */
+export function collectedCategoriesForMonthPayments(
+  payments: MonthAttributedPayment[],
+  billingMonthKey: string,
+  seed: DuesBreakdown | null
+): DuesCategoryBreakdown {
+  const sorted = [...payments].sort((a, b) => {
+    const dateCmp = a.paymentDate.localeCompare(b.paymentDate);
+    if (dateCmp !== 0) return dateCmp;
+    return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+  });
+
+  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_CATEGORY_BREAKDOWN };
+  let running: DuesBreakdown | null = seed
+    ? resetBreakdownForAllocation(withoutArrears(seed))
+    : null;
+
+  for (const payment of sorted) {
+    const amount = Math.round(Math.max(0, payment.amount));
+    if (amount <= 0) continue;
+
+    const snapshot = parseDuesBreakdownFromNotes(payment.notes);
+    const snapshotForMonth =
+      snapshot &&
+      (!snapshot.billingMonthKey ||
+        snapshot.billingMonthKey === billingMonthKey)
+        ? withoutArrears(snapshot)
+        : null;
+
+    if (snapshotForMonth) {
+      const increase = paidIncreaseMap(
+        paidMapFromLines(running?.lines ?? []),
+        snapshotForMonth.lines
+      );
+      const increaseTotal = [...increase.values()].reduce(
+        (sum, value) => sum + value,
+        0
+      );
+      if (increaseTotal > 0) {
+        addDuesCategoryBreakdown(
+          totals,
+          peelCategoriesFromPaidMap(amount, increase)
+        );
+        running = snapshotForMonth;
+        continue;
+      }
+    }
+
+    if (running) {
+      const before = categoryTotalsFromCurrentMonthLines(running);
+      running = applyAdditionalPaymentToBreakdown(running, amount);
+      const after = categoryTotalsFromCurrentMonthLines(running);
+      addDuesCategoryBreakdown(totals, {
+        rent: Math.max(0, after.rent - before.rent),
+        electricity: Math.max(0, after.electricity - before.electricity),
+        other: Math.max(0, after.other - before.other),
+      });
+      continue;
+    }
+
+    totals.rent += amount;
+  }
+
+  return totals;
 }
 
 export function appendDuesBreakdownToNotes(

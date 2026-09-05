@@ -22,6 +22,7 @@ import {
   loadElectricityBillingDraft,
   saveElectricityBillingDraft,
 } from "@/lib/electricity-billing-draft";
+import { previousIstYearMonthKey } from "@/lib/billing-month-key";
 import { formatInr } from "@/lib/receipts";
 
 function todayIsoDate(): string {
@@ -34,11 +35,7 @@ function todayIsoDate(): string {
 }
 
 function currentBillingMonth(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-  }).format(new Date());
+  return previousIstYearMonthKey();
 }
 
 type FlatReadingState = {
@@ -496,7 +493,7 @@ export default function ElectricityBillingPanel({
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Billing month
+            Usage month
           </span>
           <input
             name="billing_month"
@@ -506,6 +503,10 @@ export default function ElectricityBillingPanel({
             onChange={(e) => setBillingMonth(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Month the meters cover — not the day you enter them. A reading taken
+            in early September is August usage and shows on August dues.
+          </span>
           {loadingFlats ? (
             <span className="mt-1 block text-xs text-slate-500">
               Loading flats for this month…

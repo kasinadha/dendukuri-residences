@@ -23,7 +23,9 @@ function DuesBreakdownLine({
     breakdown.electricity > 0
       ? `Electricity ${formatInr(breakdown.electricity)}`
       : null,
-    breakdown.other > 0 ? `Other ${formatInr(breakdown.other)}` : null,
+    breakdown.other > 0
+      ? `Other charges ${formatInr(breakdown.other)}`
+      : null,
   ].filter(Boolean);
 
   if (parts.length === 0) {
@@ -168,6 +170,9 @@ export default function BuildingRevenuePanel({
           <p className="mt-1 text-sm text-slate-500">
             Rent and monthly charges only for {periodLabel}. Deposits received
             this month are shown separately and are not included in net income.
+            The rent / electricity / other-charges line is a split of dues
+            collected — other charges are parking, washer, maintenance, and
+            fines from tenants, not building expenses.
           </p>
         </div>
 

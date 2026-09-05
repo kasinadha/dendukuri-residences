@@ -51,7 +51,7 @@ export default async function ReportsPage({ searchParams }: Props) {
         <form method="get" className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Revenue month
+              Due month
             </span>
             <input
               type="month"

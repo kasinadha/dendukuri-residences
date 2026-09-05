@@ -47,7 +47,7 @@ export default async function AccountsPage({ searchParams }: Props) {
         <form method="get" className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Summary month
+              Due month
             </span>
             <input
               type="month"
@@ -55,6 +55,11 @@ export default async function AccountsPage({ searchParams }: Props) {
               defaultValue={month}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
             />
+            <span className="mt-1 block max-w-xs text-xs text-slate-500">
+              Rent due month (5th of this month). Electricity follows the meter
+              usage month — August bill, even if you entered readings in
+              September.
+            </span>
           </label>
           <button
             type="submit"

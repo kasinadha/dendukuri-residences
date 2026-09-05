@@ -296,7 +296,7 @@ export default function RecordPaymentForm({
 
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Billing month
+            Due month
           </span>
           <input
             type="month"
@@ -306,6 +306,10 @@ export default function RecordPaymentForm({
             onChange={(e) => setBillingMonth(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Rent due month (5th). For an electricity-only payment, use the meter
+            usage month — usually last month.
+          </span>
         </label>
 
         <label className="block">

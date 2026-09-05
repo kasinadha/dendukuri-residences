@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { previousIstYearMonthKey } from "@/lib/billing-month-key";
 import { friendlyDatabaseError } from "@/lib/money";
 import {
   describeFlatBillingOccupancy,
@@ -73,14 +74,6 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-function currentMonthKey(now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-  }).format(now);
-}
-
 export async function listFlatsForSelect(
   supabase: SupabaseClient
 ): Promise<FlatOption[]> {
@@ -106,7 +99,7 @@ export async function listOccupiedFlatsForBilling(
 ): Promise<OccupiedFlatForBilling[]> {
   return listFlatsForElectricityBilling(
     supabase,
-    billingMonthKey?.trim() || currentMonthKey()
+    billingMonthKey?.trim() || previousIstYearMonthKey()
   );
 }
 
@@ -535,7 +528,7 @@ export async function createElectricityBillingRun(
     flats: input.flats,
   });
 
-  const billingMonth = input.billingMonth?.trim() || currentMonthKey();
+  const billingMonth = input.billingMonth?.trim() || previousIstYearMonthKey();
 
   const { data: existingRun } = await supabase
     .from("electricity_billing_runs")

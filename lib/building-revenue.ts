@@ -7,20 +7,23 @@ import {
 import type { BuildingDepositRow } from "@/lib/deposits";
 import { loadDepositSummary } from "@/lib/deposits";
 import {
+  addDuesCategoryBreakdown,
+  collectedCategoriesForMonthPayments,
+  EMPTY_DUES_CATEGORY_BREAKDOWN,
   parseDuesBreakdownFromNotes,
   type DuesCategoryBreakdown,
 } from "@/lib/dues-breakdown";
+import { isMissingColumnError } from "@/lib/money";
+import { isVoidedPaymentStatus } from "@/lib/payment-status";
+import {
+  amountsByBillingMonth,
+  paymentDisplayMonth,
+  type PaymentMonthAllocation,
+} from "@/lib/payment-attribution";
 import { computeCollectedCategoryBreakdownForTenancy } from "@/lib/public-pay-dues";
-import { parseBillingMonthFromNotes } from "@/lib/receipts";
 
 export type { BuildingDepositRow } from "@/lib/deposits";
 export type { DuesCategoryBreakdown } from "@/lib/dues-breakdown";
-
-const EMPTY_DUES_BREAKDOWN: DuesCategoryBreakdown = {
-  rent: 0,
-  electricity: 0,
-  other: 0,
-};
 
 export type BuildingRevenueRow = {
   wing: BuildingWing;
@@ -140,16 +143,8 @@ function fallbackDuesCategoryForPayment(
   return { rent: amount, electricity: 0, other: 0 };
 }
 
-function addDuesBreakdown(
-  target: DuesCategoryBreakdown,
-  delta: DuesCategoryBreakdown
-): void {
-  target.rent += delta.rent;
-  target.electricity += delta.electricity;
-  target.other += delta.other;
-}
-
 type TenancyDuesPayment = {
+  id?: string;
   amount: number;
   paymentType: string | null;
   notes: string | null;
@@ -157,34 +152,167 @@ type TenancyDuesPayment = {
 };
 
 function incrementalDuesBreakdownFromNotes(
-  payments: TenancyDuesPayment[]
+  payments: TenancyDuesPayment[],
+  billingMonthKey: string | null
 ): DuesCategoryBreakdown {
-  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_BREAKDOWN };
+  if (billingMonthKey) {
+    return collectedCategoriesForMonthPayments(
+      payments.map((payment) => ({
+        amount: payment.amount,
+        paymentDate: payment.paymentDate,
+        notes: payment.notes,
+        id: payment.id,
+      })),
+      billingMonthKey,
+      null
+    );
+  }
+
+  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_CATEGORY_BREAKDOWN };
   for (const payment of payments) {
-    const breakdown = parseDuesBreakdownFromNotes(payment.notes);
-    if (breakdown) {
-      const rent = breakdown.lines
-        .filter((line) => line.key === "rent")
-        .reduce((sum, line) => sum + num(line.paid), 0);
-      const electricity = breakdown.lines
-        .filter((line) => line.key === "electricity")
-        .reduce((sum, line) => sum + num(line.paid), 0);
-      const other = breakdown.lines
-        .filter(
-          (line) => line.key !== "rent" && line.key !== "electricity"
+    const snapshot = parseDuesBreakdownFromNotes(payment.notes);
+    if (snapshot?.billingMonthKey) {
+      addDuesCategoryBreakdown(
+        totals,
+        collectedCategoriesForMonthPayments(
+          [
+            {
+              amount: payment.amount,
+              paymentDate: payment.paymentDate,
+              notes: payment.notes,
+              id: payment.id,
+            },
+          ],
+          snapshot.billingMonthKey,
+          null
         )
-        .reduce((sum, line) => sum + num(line.paid), 0);
-      totals.rent += rent;
-      totals.electricity += electricity;
-      totals.other += other;
+      );
       continue;
     }
-    addDuesBreakdown(
+    addDuesCategoryBreakdown(
       totals,
       fallbackDuesCategoryForPayment(payment.paymentType, payment.amount)
     );
   }
   return totals;
+}
+
+function parsePaymentAllocations(
+  raw: unknown
+): PaymentMonthAllocation[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: { billing_month?: string; amount?: unknown }) => ({
+      billingMonthKey: String(item.billing_month ?? ""),
+      amountPaid: num(item.amount),
+    }))
+    .filter(
+      (item) =>
+        /^\d{4}-\d{2}$/.test(item.billingMonthKey) && item.amountPaid > 0
+    );
+}
+
+function attributedDuesAmount(
+  row: {
+    amount_paid?: unknown;
+    billing_month?: unknown;
+    notes?: unknown;
+    payment_date?: unknown;
+    status?: unknown;
+    payment_allocations?: unknown;
+  },
+  billingMonth: string | null
+): number {
+  const amount = num(row.amount_paid);
+  if (amount <= 0) return 0;
+  if (isVoidedPaymentStatus(String(row.status ?? ""))) return 0;
+  if (!billingMonth) return amount;
+
+  const attributed = amountsByBillingMonth({
+    amountPaid: amount,
+    billingMonth:
+      typeof row.billing_month === "string" ? row.billing_month : null,
+    notes: typeof row.notes === "string" ? row.notes : null,
+    paymentDate: String(row.payment_date ?? ""),
+    allocations: parsePaymentAllocations(row.payment_allocations),
+    status: String(row.status ?? ""),
+  });
+  return attributed.get(billingMonth) ?? 0;
+}
+
+const PAYMENT_SELECT_WITH_ALLOC = `
+  id,
+  tenancy_id,
+  amount_paid,
+  payment_type,
+  payment_date,
+  notes,
+  status,
+  billing_month,
+  receiver_account_id,
+  tenancies (
+    flats ( id, flat_number, payment_account_id )
+  ),
+  payment_accounts ( label ),
+  payment_allocations ( billing_month, amount )
+`;
+
+const PAYMENT_SELECT_WITH_MONTH = `
+  id,
+  tenancy_id,
+  amount_paid,
+  payment_type,
+  payment_date,
+  notes,
+  status,
+  billing_month,
+  receiver_account_id,
+  tenancies (
+    flats ( id, flat_number, payment_account_id )
+  ),
+  payment_accounts ( label )
+`;
+
+const PAYMENT_SELECT_NOTES_ONLY = `
+  id,
+  tenancy_id,
+  amount_paid,
+  payment_type,
+  payment_date,
+  notes,
+  status,
+  receiver_account_id,
+  tenancies (
+    flats ( id, flat_number, payment_account_id )
+  ),
+  payment_accounts ( label )
+`;
+
+async function loadRevenuePayments(
+  supabase: SupabaseClient
+): Promise<Record<string, unknown>[]> {
+  async function run(select: string) {
+    return supabase
+      .from("payments")
+      .select(select)
+      .gt("amount_paid", 0)
+      .order("payment_date", { ascending: false })
+      .limit(5000);
+  }
+
+  let result = await run(PAYMENT_SELECT_WITH_ALLOC);
+  if (
+    result.error &&
+    (isMissingColumnError(result.error.message) ||
+      /payment_allocations/i.test(result.error.message ?? ""))
+  ) {
+    result = await run(PAYMENT_SELECT_WITH_MONTH);
+  }
+  if (result.error && isMissingColumnError(result.error.message)) {
+    result = await run(PAYMENT_SELECT_NOTES_ONLY);
+  }
+  if (result.error || !result.data) return [];
+  return result.data as unknown as Record<string, unknown>[];
 }
 
 async function loadDepositTotalsByBuilding(
@@ -220,26 +348,7 @@ export async function getBuildingRevenueReport(
     otherResult,
     depositSummary,
   ] = await Promise.all([
-    supabase
-      .from("payments")
-      .select(
-        `
-          id,
-          tenancy_id,
-          amount_paid,
-          payment_type,
-          payment_date,
-          notes,
-          receiver_account_id,
-          tenancies (
-            flats ( id, flat_number, payment_account_id )
-          ),
-          payment_accounts ( label )
-        `
-      )
-      .gt("amount_paid", 0)
-      .order("payment_date", { ascending: false })
-      .limit(500),
+    loadRevenuePayments(supabase),
     supabase
       .from("payment_accounts")
       .select("id,label,code")
@@ -294,20 +403,24 @@ export async function getBuildingRevenueReport(
   >();
   let totalDuesCollected = 0;
   let totalDepositsCollected = 0;
-  const totalDuesBreakdown: DuesCategoryBreakdown = { ...EMPTY_DUES_BREAKDOWN };
+  const totalDuesBreakdown: DuesCategoryBreakdown = {
+    ...EMPTY_DUES_CATEGORY_BREAKDOWN,
+  };
 
-  for (const row of paymentsResult.data ?? []) {
-    const amount = num(row.amount_paid);
+  for (const row of paymentsResult) {
+    const amount = attributedDuesAmount(row, billingMonth);
     if (amount <= 0) continue;
-
-    const { billingMonthKey } = parseBillingMonthFromNotes(row.notes);
-    if (billingMonth && billingMonthKey !== billingMonth) continue;
 
     const bucket = paymentBucket(row.payment_type as string | null);
     if (bucket === "deposit") totalDepositsCollected += amount;
     else totalDuesCollected += amount;
 
-    const tenancy = unwrapOne(row.tenancies);
+    const tenancy = unwrapOne(
+      row.tenancies as
+        | { flats?: { id?: string; flat_number?: string | null } | { id?: string; flat_number?: string | null }[] | null }
+        | { flats?: { id?: string; flat_number?: string | null } | { id?: string; flat_number?: string | null }[] | null }[]
+        | null
+    );
     const flat = unwrapOne(tenancy?.flats ?? null);
     const flatNumber = flat?.flat_number ?? null;
     const wing = buildingWingFromFlatNumber(flatNumber);
@@ -330,6 +443,7 @@ export async function getBuildingRevenueReport(
         };
         if (flatId && !group.flatId) group.flatId = flatId;
         group.payments.push({
+          id: String(row.id ?? ""),
           amount,
           paymentType: (row.payment_type as string | null) ?? null,
           notes: (row.notes as string | null) ?? null,
@@ -339,8 +453,13 @@ export async function getBuildingRevenueReport(
       }
     }
 
-    const accountId = row.receiver_account_id ?? null;
-    const accountFromJoin = unwrapOne(row.payment_accounts);
+    const accountId =
+      typeof row.receiver_account_id === "string"
+        ? row.receiver_account_id
+        : null;
+    const accountFromJoin = unwrapOne(
+      row.payment_accounts as { label?: string | null } | { label?: string | null }[] | null
+    );
     const label =
       accountFromJoin?.label?.trim() ||
       (accountId ? accountLabelById.get(accountId) : null) ||
@@ -371,15 +490,17 @@ export async function getBuildingRevenueReport(
             payments: group.payments.map((payment) => ({
               amount: payment.amount,
               paymentDate: payment.paymentDate,
+              notes: payment.notes,
+              id: payment.id,
             })),
           })
-        : incrementalDuesBreakdownFromNotes(group.payments);
+        : incrementalDuesBreakdownFromNotes(group.payments, billingMonth);
     const wingTotals = buildingDuesBreakdown.get(group.wing) ?? {
-      ...EMPTY_DUES_BREAKDOWN,
+      ...EMPTY_DUES_CATEGORY_BREAKDOWN,
     };
-    addDuesBreakdown(wingTotals, breakdown);
+    addDuesCategoryBreakdown(wingTotals, breakdown);
     buildingDuesBreakdown.set(group.wing, wingTotals);
-    addDuesBreakdown(totalDuesBreakdown, breakdown);
+    addDuesCategoryBreakdown(totalDuesBreakdown, breakdown);
   }
 
   const expenseTotals = new Map<
@@ -502,7 +623,9 @@ export async function getBuildingRevenueReport(
         label: buildingWingLabel(wing),
         duesCollected: dues.collected,
         duesBreakdown:
-          buildingDuesBreakdown.get(wing) ?? { ...EMPTY_DUES_BREAKDOWN },
+          buildingDuesBreakdown.get(wing) ?? {
+            ...EMPTY_DUES_CATEGORY_BREAKDOWN,
+          },
         depositsCollected: deposits.collected,
         spent: expense.spent,
         net: dues.collected - expense.spent,
@@ -568,15 +691,51 @@ export async function getMonthlyDepositsCollected(
   supabase: SupabaseClient,
   billingMonthKey: string
 ): Promise<number> {
-  const { data } = await supabase
+  let data:
+    | {
+        amount_paid: unknown;
+        notes: unknown;
+        payment_type: unknown;
+        payment_date: unknown;
+        billing_month?: unknown;
+        status?: unknown;
+      }[]
+    | null = null;
+
+  const full = await supabase
     .from("payments")
-    .select("amount_paid, notes, payment_type")
+    .select("amount_paid, notes, payment_type, payment_date, billing_month, status")
     .eq("payment_type", "advance")
     .gt("amount_paid", 0);
+  if (!full.error) {
+    data = full.data;
+  } else if (isMissingColumnError(full.error.message)) {
+    const withStatus = await supabase
+      .from("payments")
+      .select("amount_paid, notes, payment_type, payment_date, status")
+      .eq("payment_type", "advance")
+      .gt("amount_paid", 0);
+    if (!withStatus.error) {
+      data = withStatus.data;
+    } else if (isMissingColumnError(withStatus.error.message)) {
+      const notesOnly = await supabase
+        .from("payments")
+        .select("amount_paid, notes, payment_type, payment_date")
+        .eq("payment_type", "advance")
+        .gt("amount_paid", 0);
+      data = notesOnly.data;
+    }
+  }
 
   let total = 0;
   for (const row of data ?? []) {
-    const { billingMonthKey: key } = parseBillingMonthFromNotes(row.notes);
+    if (isVoidedPaymentStatus(String(row.status ?? ""))) continue;
+    const key = paymentDisplayMonth({
+      billingMonth:
+        typeof row.billing_month === "string" ? row.billing_month : null,
+      notes: typeof row.notes === "string" ? row.notes : null,
+      paymentDate: String(row.payment_date ?? ""),
+    });
     if (key !== billingMonthKey) continue;
     total += num(row.amount_paid);
   }

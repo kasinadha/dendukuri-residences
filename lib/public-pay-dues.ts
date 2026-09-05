@@ -7,11 +7,9 @@ import type {
 } from "@/lib/dues-breakdown";
 import {
   allocatePaymentsAcrossLines,
-  applyAdditionalPaymentToBreakdown,
-  categoryTotalsFromBreakdown,
+  collectedCategoriesForMonthPayments,
   computeBreakdownTotals,
   parseDuesBreakdownFromNotes,
-  resetBreakdownForAllocation,
 } from "@/lib/dues-breakdown";
 import { getTenantMonthDue } from "@/lib/reminders";
 import { formatBillingMonthLabel } from "@/lib/receipts";
@@ -321,8 +319,9 @@ export function parseDuesBreakdownJson(raw: string): DuesBreakdown | null {
 }
 
 /**
- * Split collected dues into rent / electricity / other by re-applying payments
- * against the live dues structure (includes electricity billing for the month).
+ * Split collected dues into rent / electricity / other for one tenancy-month.
+ * Prefers stored payment snapshots so a later electricity payment is not
+ * re-applied as rent or swallowed by arrears.
  */
 export async function computeCollectedCategoryBreakdownForTenancy(
   supabase: SupabaseClient,
@@ -330,31 +329,36 @@ export async function computeCollectedCategoryBreakdownForTenancy(
     tenancyId: string;
     flatId: string;
     billingMonthKey: string;
-    payments: Array<{ amount: number; paymentDate: string }>;
+    payments: Array<{
+      amount: number;
+      paymentDate: string;
+      notes?: string | null;
+      id?: string;
+    }>;
   }
 ): Promise<DuesCategoryBreakdown> {
-  const sorted = [...input.payments].sort((a, b) =>
-    a.paymentDate.localeCompare(b.paymentDate)
+  const totalPaid = input.payments.reduce(
+    (sum, payment) => sum + payment.amount,
+    0
   );
-  const totalPaid = sorted.reduce((sum, payment) => sum + payment.amount, 0);
   if (totalPaid <= 0) {
     return { rent: 0, electricity: 0, other: 0 };
   }
 
-  const dues = await getTenancyDuesBreakdownWithArrears(supabase, {
+  const dues = await getTenancyDuesBreakdown(supabase, {
     tenancyId: input.tenancyId,
     flatId: input.flatId,
     billingMonthKey: input.billingMonthKey,
   });
 
-  if (!dues.ok) {
-    return { rent: totalPaid, electricity: 0, other: 0 };
-  }
-
-  let breakdown = resetBreakdownForAllocation(dues.breakdown);
-  for (const payment of sorted) {
-    breakdown = applyAdditionalPaymentToBreakdown(breakdown, payment.amount);
-  }
-
-  return categoryTotalsFromBreakdown(breakdown);
+  return collectedCategoriesForMonthPayments(
+    input.payments.map((payment) => ({
+      amount: payment.amount,
+      paymentDate: payment.paymentDate,
+      notes: payment.notes ?? null,
+      id: payment.id,
+    })),
+    input.billingMonthKey,
+    dues.ok ? dues.breakdown : null
+  );
 }

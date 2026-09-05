@@ -4,7 +4,10 @@ import {
 } from "@/lib/electricity-occupancy";
 
 /**
- * Shared rules for rent, monthly charges, and electricity.
+ * Shared occupancy rules for rent, monthly charges, and electricity.
+ * Billing month keys are calendar months of the 5th due date
+ * (August rent is due 5 Aug). Electricity uses the same key for the *usage*
+ * month (August meters), which is usually the month before you take the reading.
  * - Requires move-in date; move-in month and earlier months: no dues.
  * - Vacate month still included (overlap via end_date); later months excluded.
  */
