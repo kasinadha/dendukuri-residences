@@ -25,7 +25,8 @@ export default function ElectricityForm({ flats }: { flats: FlatOption[] }) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     startTransition(async () => {
       const result = await recordElectricityReading(formData);
       if (!result.ok) {
@@ -33,7 +34,7 @@ export default function ElectricityForm({ flats }: { flats: FlatOption[] }) {
         return;
       }
       setSuccess("Reading saved.");
-      event.currentTarget.reset();
+      form.reset();
       router.refresh();
     });
   }

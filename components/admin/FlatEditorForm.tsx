@@ -27,7 +27,8 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
 
     startTransition(async () => {
       const result = isEdit
@@ -40,7 +41,7 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
       }
 
       setSuccess(isEdit ? "Flat updated." : "Flat saved to Supabase.");
-      if (!isEdit) event.currentTarget.reset();
+      if (!isEdit) form.reset();
       onCancelEdit?.();
       router.refresh();
     });

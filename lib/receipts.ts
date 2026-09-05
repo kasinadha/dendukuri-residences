@@ -4,6 +4,7 @@ import type { DuesBreakdown } from "@/lib/dues-breakdown";
 import { parseDuesBreakdownFromNotes } from "@/lib/dues-breakdown";
 import { resolveReceiptDuesBreakdown } from "@/lib/public-pay-dues";
 import { PROPERTY_NAME } from "@/lib/property";
+import { isVoidedPaymentStatus } from "@/lib/payment-status";
 
 export const BILLING_MONTH_NOTE_PREFIX = "billing_month:";
 
@@ -476,6 +477,7 @@ export async function listReceiptViews(
     receipts.map(async (receipt) => {
       const payment = byId.get(receipt.payment_id);
       if (!payment) return null;
+      if (isVoidedPaymentStatus(payment.status)) return null;
       return enrichReceiptViewModel(
         supabase,
         receipt as ReceiptRecord,

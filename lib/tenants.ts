@@ -670,15 +670,15 @@ function mapTenantRows(
   });
 }
 
-export async function incrementTenancyDepositPaid(
+export async function adjustTenancyDepositPaid(
   supabase: SupabaseClient,
   input: {
     tenancyId: string;
     amount: number;
-    paymentDate: string;
+    paymentDate?: string;
   }
 ): Promise<{ ok: true; depositPaid: number } | { ok: false; error: string }> {
-  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+  if (!Number.isFinite(input.amount) || input.amount === 0) {
     return { ok: false, error: "Invalid deposit amount." };
   }
 
@@ -692,14 +692,16 @@ export async function incrementTenancyDepositPaid(
     return { ok: false, error: error?.message || "Tenancy not found." };
   }
 
-  const nextPaid = (num(data.deposit_paid) ?? 0) + input.amount;
+  const nextPaid = Math.max(0, (num(data.deposit_paid) ?? 0) + input.amount);
   const depositAmount =
     num(data.deposit_amount) ?? num(data.security_deposit) ?? null;
   const { error: updateError } = await supabase
     .from("tenancies")
     .update({
       deposit_paid: nextPaid,
-      deposit_paid_date: input.paymentDate,
+      ...(input.amount > 0 && input.paymentDate
+        ? { deposit_paid_date: input.paymentDate }
+        : {}),
       ...(depositAmount != null
         ? { deposit_amount: depositAmount, security_deposit: depositAmount }
         : {}),
@@ -711,4 +713,18 @@ export async function incrementTenancyDepositPaid(
   }
 
   return { ok: true, depositPaid: nextPaid };
+}
+
+export async function incrementTenancyDepositPaid(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    amount: number;
+    paymentDate: string;
+  }
+): Promise<{ ok: true; depositPaid: number } | { ok: false; error: string }> {
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return { ok: false, error: "Invalid deposit amount." };
+  }
+  return adjustTenancyDepositPaid(supabase, input);
 }

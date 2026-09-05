@@ -432,6 +432,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
                       </Link>
                     </>
                   ) : null}
+                  {row.status !== "voided" ? (
                   <PaymentVoidButton
                     paymentId={row.paymentId}
                     flatNumber={row.flatNumber}
@@ -440,6 +441,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
                     amountPaidLabel={formatInr(row.amountPaid)}
                     receiptNumber={row.receiptNumber}
                   />
+                  ) : null}
                   {row.paymentType === "rent" ? (
                     <ReclassifyDepositButton
                       paymentId={row.paymentId}

@@ -101,7 +101,8 @@ export default function TenantRentPaymentForm({
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     formData.set("tenancy_id", tenancyId);
     if (previewBreakdown) {
       formData.set("dues_breakdown_json", JSON.stringify(previewBreakdown));
@@ -116,7 +117,7 @@ export default function TenantRentPaymentForm({
         setSuccess(
           "Submitted. The owner will confirm the UTR and your receipt will appear under Receipts."
         );
-        event.currentTarget?.reset();
+        form.reset();
         setAmount(monthlyRent != null ? String(monthlyRent) : "");
         setBillingMonth(defaultBillingMonth);
         router.refresh();

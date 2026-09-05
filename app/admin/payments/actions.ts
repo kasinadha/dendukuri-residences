@@ -7,6 +7,7 @@ import { getTenantMonthDue } from "@/lib/reminders";
 import {
   appendDuesBreakdownToNotes,
   applyAdditionalPaymentToBreakdown,
+  breakdownGrandOutstanding,
 } from "@/lib/dues-breakdown";
 import {
   approvePaymentSubmission,
@@ -28,6 +29,17 @@ import { voidPaymentRecord } from "@/lib/void-payment";
 import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
 import { reclassifyPaymentAsDeposit } from "@/lib/deposits";
 import { incrementTenancyDepositPaid } from "@/lib/tenants";
+import {
+  isValidBillingMonth,
+  isValidIsoDate,
+  parseRupeeAmount,
+} from "@/lib/money";
+import {
+  allocationsFromPayment,
+  findLivePaymentByUtr,
+  insertPaymentAllocations,
+} from "@/lib/payment-attribution";
+import { formatActionError } from "@/lib/format-action-error";
 
 export type RecordPaymentResult =
   | {
@@ -45,70 +57,101 @@ function asString(formData: FormData, key: string): string {
 
 export async function approvePaymentSubmissionAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
-  const amountRaw = asString(formData, "amount");
-  const amount = amountRaw ? Number(amountRaw) : null;
-  const result = await approvePaymentSubmission(supabase, {
-    id: asString(formData, "id"),
-    adminNotes: asString(formData, "admin_notes") || null,
-    reviewedBy: user.id,
-    receiverAccountId: asString(formData, "receiver_account_id") || null,
-    amount:
-      amount != null && Number.isFinite(amount) && amount > 0 ? amount : null,
-  });
-  if (result.ok) {
-    revalidatePath("/admin/payments");
-    revalidatePath("/admin/receipts");
-    revalidatePath("/admin");
-    revalidatePath("/admin/reports");
-    revalidatePath("/admin/accounts");
-    revalidatePath("/admin/tenants");
-    revalidatePath("/tenant/receipts");
-    revalidatePath("/tenant/pay");
-    revalidatePath("/tenant");
-    revalidatePath("/pay");
+  try {
+    const amountRaw = asString(formData, "amount");
+    const parsedAmount = amountRaw ? parseRupeeAmount(amountRaw) : null;
+    const result = await approvePaymentSubmission(supabase, {
+      id: asString(formData, "id"),
+      adminNotes: asString(formData, "admin_notes") || null,
+      reviewedBy: user.id,
+      receiverAccountId: asString(formData, "receiver_account_id") || null,
+      amount: parsedAmount,
+    });
+    if (result.ok) {
+      revalidatePath("/admin/payments");
+      revalidatePath("/admin/receipts");
+      revalidatePath("/admin");
+      revalidatePath("/admin/reports");
+      revalidatePath("/admin/accounts");
+      revalidatePath("/admin/tenants");
+      revalidatePath("/tenant/receipts");
+      revalidatePath("/tenant/pay");
+      revalidatePath("/tenant");
+      revalidatePath("/pay");
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not approve this UTR. Try again."),
+    };
   }
-  return result;
 }
 
 export async function rejectPaymentSubmissionAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
-  const result = await rejectPaymentSubmission(supabase, {
-    id: asString(formData, "id"),
-    adminNotes: asString(formData, "admin_notes") || null,
-    reviewedBy: user.id,
-  });
-  if (result.ok) {
-    revalidatePath("/admin/payments");
-    revalidatePath("/tenant/pay");
-    revalidatePath("/tenant");
+  try {
+    const result = await rejectPaymentSubmission(supabase, {
+      id: asString(formData, "id"),
+      adminNotes: asString(formData, "admin_notes") || null,
+      reviewedBy: user.id,
+    });
+    if (result.ok) {
+      revalidatePath("/admin/payments");
+      revalidatePath("/tenant/pay");
+      revalidatePath("/tenant");
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not reject this UTR. Try again."),
+    };
   }
-  return result;
 }
 
 export async function fetchTenancyDuesBreakdownAction(formData: FormData) {
   const { supabase } = await requireAdmin();
-  const tenancyId = asString(formData, "tenancy_id");
-  const flatId = asString(formData, "flat_id");
-  const billingMonth = asString(formData, "billing_month");
+  try {
+    const tenancyId = asString(formData, "tenancy_id");
+    const flatId = asString(formData, "flat_id");
+    const billingMonth = asString(formData, "billing_month");
 
-  if (!tenancyId || !flatId) {
-    return { ok: false as const, error: "Select a tenancy." };
-  }
-  if (!/^\d{4}-\d{2}$/.test(billingMonth)) {
-    return { ok: false as const, error: "Billing month is invalid." };
-  }
+    if (!tenancyId || !flatId) {
+      return { ok: false as const, error: "Select a tenancy." };
+    }
+    if (!/^\d{4}-\d{2}$/.test(billingMonth)) {
+      return { ok: false as const, error: "Billing month is invalid." };
+    }
 
-  return getTenancyDuesBreakdownWithArrears(supabase, {
-    tenancyId,
-    flatId,
-    billingMonthKey: billingMonth,
-  });
+    return getTenancyDuesBreakdownWithArrears(supabase, {
+      tenancyId,
+      flatId,
+      billingMonthKey: billingMonth,
+    });
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not load dues. Try again."),
+    };
+  }
 }
 
 export async function recordRentPayment(
   formData: FormData
 ): Promise<RecordPaymentResult> {
   const { supabase } = await requireAdmin();
+  try {
+    return await recordRentPaymentInner(supabase, formData);
+  } catch (error) {
+    return { ok: false, error: formatActionError(error, "Could not record payment.") };
+  }
+}
+
+async function recordRentPaymentInner(
+  supabase: Awaited<ReturnType<typeof requireAdmin>>["supabase"],
+  formData: FormData
+): Promise<RecordPaymentResult> {
 
   const tenancyId = asString(formData, "tenancy_id");
   const amountDueRaw = asString(formData, "amount_due");
@@ -125,22 +168,35 @@ export async function recordRentPayment(
     asString(formData, "receiver_account_id") || null;
 
   if (!tenancyId) return { ok: false, error: "Select a tenancy." };
-  if (!paymentDate) return { ok: false, error: "Payment date is required." };
+  if (!isValidIsoDate(paymentDate)) {
+    return { ok: false, error: "Payment date is required." };
+  }
   if (!paymentMode) return { ok: false, error: "Payment method is required." };
-  if (!/^\d{4}-\d{2}$/.test(billingMonth)) {
+  if (!isValidBillingMonth(billingMonth)) {
     return { ok: false, error: "Billing month must be a valid month." };
   }
 
-  const amountDue = Number(amountDueRaw);
-  const amountPaid = Number(amountPaidRaw);
-  if (!Number.isFinite(amountDue) || amountDue < 0) {
-    return { ok: false, error: "Enter a valid amount due." };
+  const amountDueInput = parseRupeeAmount(amountDueRaw, { allowZero: true });
+  const amountPaidInput = waived
+    ? 0
+    : parseRupeeAmount(amountPaidRaw);
+  if (amountDueInput == null) {
+    return { ok: false, error: "Enter a valid amount due (0 or more)." };
   }
-  if (!waived && (!Number.isFinite(amountPaid) || amountPaid < 0)) {
-    return { ok: false, error: "Enter a valid amount paid." };
-  }
-  if (!waived && amountPaid <= 0) {
+  if (!waived && amountPaidInput == null) {
     return { ok: false, error: "Amount paid must be greater than zero." };
+  }
+  const amountPaid = waived ? 0 : amountPaidInput ?? 0;
+
+  if (transactionReference) {
+    const existing = await findLivePaymentByUtr(supabase, transactionReference);
+    if (existing) {
+      return {
+        ok: false,
+        error:
+          "This UTR / transaction reference is already recorded. Void the earlier payment first if this is a correction.",
+      };
+    }
   }
 
   const tenancyResult = await fetchTenancyForPayment(supabase, tenancyId);
@@ -162,27 +218,36 @@ export async function recordRentPayment(
 
   const status = waived
     ? "waived"
-    : computePaymentStatus(amountDue, amountPaid);
+    : computePaymentStatus(amountDueInput, amountPaid);
 
   const flat = unwrapFlat(tenancy.flats);
-  const duesBreakdown =
-    !isDeposit && !waived
+  const flatId = flat?.id;
+  const baseBreakdown =
+    !isDeposit && flatId
       ? await (async () => {
           const breakdownResult = await getTenancyDuesBreakdownWithArrears(
             supabase,
             {
               tenancyId,
-              flatId: flat?.id ?? "",
+              flatId,
               billingMonthKey: billingMonth,
             }
           );
           if (!breakdownResult.ok) return null;
-          return applyAdditionalPaymentToBreakdown(
-            breakdownResult.breakdown,
-            amountPaid
-          );
+          return breakdownResult.breakdown;
         })()
       : null;
+  const duesBreakdown =
+    baseBreakdown && !waived
+      ? applyAdditionalPaymentToBreakdown(baseBreakdown, amountPaid)
+      : null;
+  const amountDue = baseBreakdown
+    ? breakdownGrandOutstanding(baseBreakdown)
+    : amountDueInput;
+  const monthAllocations =
+    baseBreakdown && !waived && !isDeposit
+      ? allocationsFromPayment(baseBreakdown, amountPaid)
+      : [];
 
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId: explicitReceiverAccountId,
@@ -201,6 +266,7 @@ export async function recordRentPayment(
     payment_type: isDeposit ? "advance" : "rent",
     transaction_reference: transactionReference || null,
     status,
+    billing_month: billingMonth,
     notes: isDeposit
       ? encodeBillingMonthNote(
           billingMonth,
@@ -222,6 +288,18 @@ export async function recordRentPayment(
     return { ok: false, error: paymentResult.error };
   }
   const paymentId = paymentResult.paymentId;
+
+  if (monthAllocations.length > 0) {
+    const allocated = await insertPaymentAllocations(
+      supabase,
+      paymentId,
+      monthAllocations
+    );
+    if (!allocated.ok) {
+      await supabase.from("payments").delete().eq("id", paymentId);
+      return { ok: false, error: allocated.error };
+    }
+  }
 
   if (isDeposit && !waived) {
     const depositUpdate = await incrementTenancyDepositPaid(supabase, {
@@ -290,28 +368,42 @@ function revalidateAfterPaymentChange() {
 
 export async function reclassifyPaymentAsDepositAction(paymentId: string) {
   const { supabase } = await requireAdmin();
-  const result = await reclassifyPaymentAsDeposit(supabase, paymentId);
-  if (result.ok) {
-    revalidateAfterPaymentChange();
+  try {
+    const result = await reclassifyPaymentAsDeposit(supabase, paymentId);
+    if (result.ok) {
+      revalidateAfterPaymentChange();
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not reclassify this payment."),
+    };
   }
-  return result;
 }
 
 export async function voidPaymentAction(formData: FormData) {
   const { supabase } = await requireAdmin();
-  const paymentId = asString(formData, "payment_id");
-  const confirm = asString(formData, "confirm");
+  try {
+    const paymentId = asString(formData, "payment_id");
+    const confirm = asString(formData, "confirm");
 
-  if (confirm.toUpperCase() !== "VOID") {
-    return { ok: false as const, error: 'Type VOID to confirm deletion.' };
-  }
-  if (!paymentId) {
-    return { ok: false as const, error: "Missing payment id." };
-  }
+    if (confirm.toUpperCase() !== "VOID") {
+      return { ok: false as const, error: "Type VOID to confirm." };
+    }
+    if (!paymentId) {
+      return { ok: false as const, error: "Missing payment id." };
+    }
 
-  const result = await voidPaymentRecord(supabase, paymentId);
-  if (result.ok) {
-    revalidateAfterPaymentChange();
+    const result = await voidPaymentRecord(supabase, paymentId);
+    if (result.ok) {
+      revalidateAfterPaymentChange();
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not void this payment. Try again."),
+    };
   }
-  return result;
 }

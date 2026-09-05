@@ -14,6 +14,13 @@ import {
   insertReceiptWithUniqueNumber,
 } from "@/lib/receipts";
 import { incrementTenancyDepositPaid } from "@/lib/tenants";
+import { friendlyDatabaseError, isValidBillingMonth } from "@/lib/money";
+import {
+  allocationsFromPayment,
+  findLivePaymentByUtr,
+  insertPaymentAllocations,
+} from "@/lib/payment-attribution";
+import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
 
 export type PaymentSubmission = {
   id: string;
@@ -222,11 +229,11 @@ export async function createPaymentSubmission(
     submittedBy: string;
   }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  if (!/^\d{4}-\d{2}$/.test(input.billingMonth)) {
+  if (!isValidBillingMonth(input.billingMonth)) {
     return { ok: false, error: "Billing month is invalid." };
   }
   if (!Number.isFinite(input.amount) || input.amount <= 0) {
-    return { ok: false, error: "Enter a valid amount." };
+    return { ok: false, error: "Enter a valid amount greater than zero." };
   }
   if (!input.utr.trim()) {
     return { ok: false, error: "UTR / transaction reference is required." };
@@ -250,6 +257,27 @@ export async function createPaymentSubmission(
     };
   }
 
+  const utr = input.utr.trim();
+  const { data: pendingUtr } = await supabase
+    .from("payment_submissions")
+    .select("id")
+    .eq("status", "pending")
+    .ilike("utr", utr)
+    .limit(1);
+  if (pendingUtr && pendingUtr.length > 0) {
+    return {
+      ok: false,
+      error: "This UTR is already waiting for owner approval.",
+    };
+  }
+  const liveUtr = await findLivePaymentByUtr(supabase, utr);
+  if (liveUtr) {
+    return {
+      ok: false,
+      error: "This UTR is already recorded on a payment.",
+    };
+  }
+
   let flatId = input.flatId ?? null;
   if (!flatId) {
     const { data: tenancy } = await supabase
@@ -270,7 +298,7 @@ export async function createPaymentSubmission(
     billing_month: input.billingMonth,
     amount: input.amount,
     payment_date: input.paymentDate,
-    utr: input.utr.trim(),
+    utr,
     upi_id: input.upiId?.trim() || null,
     notes: submissionNotes,
     proof_path: input.proofPath?.trim() || null,
@@ -298,7 +326,7 @@ export async function createPaymentSubmission(
           billing_month: input.billingMonth,
           amount: input.amount,
           payment_date: input.paymentDate,
-          utr: input.utr.trim(),
+          utr: utr,
           upi_id: input.upiId?.trim() || null,
           notes: submissionNotes,
           proof_path: input.proofPath?.trim() || null,
@@ -311,11 +339,12 @@ export async function createPaymentSubmission(
     }
     return {
       ok: false,
-      error:
+      error: friendlyDatabaseError(
         msg.includes("proof_path")
           ? "Payment proof column is missing. Ask admin to run the payment-proofs migration."
           : msg ||
-            "Could not submit payment. If this is the first time, ask admin to run the payment_submissions migration.",
+            "Could not submit payment. If this is the first time, ask admin to run the payment_submissions migration."
+      ),
     };
   }
 
@@ -565,6 +594,17 @@ export async function approvePaymentSubmission(
         ?.payment_account_id ?? null;
   }
 
+  const liveUtr = await findLivePaymentByUtr(
+    supabase,
+    String(submission.utr ?? "")
+  );
+  if (liveUtr) {
+    return {
+      ok: false,
+      error: "This UTR is already recorded on a payment.",
+    };
+  }
+
   const receiverAccountId = await resolveReceiverAccountId(supabase, {
     explicitAccountId:
       input.receiverAccountId || submission.receiver_account_id || null,
@@ -575,6 +615,20 @@ export async function approvePaymentSubmission(
   });
 
   const duesBreakdown = parseDuesBreakdownFromNotes(submission.notes);
+  let monthAllocations: { billingMonthKey: string; amountPaid: number }[] = [];
+  if (purpose === "rent" && submission.flat_id) {
+    const liveBreakdown = await getTenancyDuesBreakdownWithArrears(supabase, {
+      tenancyId,
+      flatId: String(submission.flat_id),
+      billingMonthKey: billingMonth,
+    });
+    if (liveBreakdown.ok) {
+      monthAllocations = allocationsFromPayment(
+        liveBreakdown.breakdown,
+        approvedAmount
+      );
+    }
+  }
   const billingNote = encodeBillingMonthNote(
     billingMonth,
     [
@@ -604,6 +658,7 @@ export async function approvePaymentSubmission(
     payment_type: purpose,
     transaction_reference: submission.utr,
     status: "paid",
+    billing_month: billingMonth,
     notes: appendDuesBreakdownToNotes(billingNote, duesBreakdown),
   };
 
@@ -616,6 +671,18 @@ export async function approvePaymentSubmission(
     return { ok: false, error: paymentResult.error };
   }
   const paymentId = paymentResult.paymentId;
+
+  if (monthAllocations.length > 0) {
+    const allocated = await insertPaymentAllocations(
+      supabase,
+      paymentId,
+      monthAllocations
+    );
+    if (!allocated.ok) {
+      await supabase.from("payments").delete().eq("id", paymentId);
+      return { ok: false, error: allocated.error };
+    }
+  }
 
   try {
     const receipt = await insertReceiptWithUniqueNumber(supabase, paymentId);
@@ -669,9 +736,11 @@ export async function approvePaymentSubmission(
     }
 
     if (updateError) {
+      await supabase.from("receipts").delete().eq("payment_id", paymentId);
+      await supabase.from("payments").delete().eq("id", paymentId);
       return {
         ok: false,
-        error: `Receipt ${receipt.receipt_number} was created, but submission update failed: ${updateError.message}`,
+        error: `Could not finish approval (${updateError.message}). The payment was rolled back so it will not double-post.`,
       };
     }
 

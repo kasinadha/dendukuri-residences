@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { friendlyDatabaseError } from "@/lib/money";
 
 export type ChangeRequestStatus = "pending" | "approved" | "rejected";
 
@@ -170,7 +171,12 @@ export async function submitNameChangeRequest(
     .single();
 
   if (error || !data) {
-    return { ok: false, error: error?.message ?? "Could not submit the request." };
+    return {
+      ok: false,
+      error: friendlyDatabaseError(
+        error?.message ?? "Could not submit the request."
+      ),
+    };
   }
   return { ok: true, id: data.id };
 }

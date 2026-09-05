@@ -12,6 +12,8 @@ import {
 } from "@/lib/public-pay";
 import { resolveRentUpiDisplay } from "@/lib/rent-upi";
 import { createClient } from "@/lib/supabase/server";
+import { parseRupeeAmount } from "@/lib/money";
+import { formatActionError } from "@/lib/format-action-error";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -67,8 +69,8 @@ export async function submitPublicPayClaimAction(formData: FormData) {
       return { ok: false as const, error: "Flat number is required." };
     }
 
-    const amount = Number(asString(formData, "amount"));
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const amount = parseRupeeAmount(asString(formData, "amount"));
+    if (amount == null) {
       return { ok: false as const, error: "Enter a valid amount." };
     }
 
@@ -113,17 +115,9 @@ export async function submitPublicPayClaimAction(formData: FormData) {
     }
     return result;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/Body exceeded|body size limit|413/i.test(message)) {
-      return {
-        ok: false as const,
-        error:
-          "Upload is too large. Remove the screenshot or use a smaller image (under 5 MB).",
-      };
-    }
     return {
       ok: false as const,
-      error: message || "Could not submit payment claim.",
+      error: formatActionError(err, "Could not submit payment claim."),
     };
   }
 }

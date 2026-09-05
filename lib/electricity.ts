@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { friendlyDatabaseError } from "@/lib/money";
 import {
   describeFlatBillingOccupancy,
   tenancyOverlapsBillingMonth,
@@ -490,6 +491,14 @@ export async function createElectricityBillingRun(
   if (!input.readingDate) {
     return { ok: false, error: "Reading date is required." };
   }
+  if (
+    !Number.isFinite(input.buildingCurrentReading) ||
+    !Number.isFinite(input.buildingPreviousReading) ||
+    input.buildingPreviousReading < 0 ||
+    input.buildingCurrentReading < 0
+  ) {
+    return { ok: false, error: "Building meter readings must be 0 or more." };
+  }
   if (input.buildingCurrentReading < input.buildingPreviousReading) {
     return {
       ok: false,
@@ -501,10 +510,18 @@ export async function createElectricityBillingRun(
   }
 
   for (const flat of input.flats) {
+    if (
+      !Number.isFinite(flat.currentReading) ||
+      !Number.isFinite(flat.previousReading) ||
+      flat.currentReading < 0 ||
+      flat.previousReading < 0
+    ) {
+      return { ok: false, error: "Flat meter readings must be 0 or more." };
+    }
     if (flat.currentReading < flat.previousReading) {
       return {
         ok: false,
-        error: `Flat reading must be ≥ previous reading.`,
+        error: "Flat reading must be ≥ previous reading.",
       };
     }
   }
@@ -519,6 +536,19 @@ export async function createElectricityBillingRun(
   });
 
   const billingMonth = input.billingMonth?.trim() || currentMonthKey();
+
+  const { data: existingRun } = await supabase
+    .from("electricity_billing_runs")
+    .select("id")
+    .eq("billing_month", billingMonth)
+    .eq("building_wing", input.buildingWing)
+    .limit(1);
+  if (existingRun && existingRun.length > 0) {
+    return {
+      ok: false,
+      error: `A billing run for Building ${input.buildingWing} already exists for ${billingMonth}.`,
+    };
+  }
 
   const { data: run, error: runError } = await supabase
     .from("electricity_billing_runs")
@@ -555,10 +585,10 @@ export async function createElectricityBillingRun(
     if (/unique|duplicate/i.test(runMessage)) {
       return {
         ok: false,
-        error: `A billing run for Building ${input.buildingWing} already exists for this month and reading date.`,
+        error: `A billing run for Building ${input.buildingWing} already exists for ${billingMonth}.`,
       };
     }
-    return { ok: false, error: runMessage };
+    return { ok: false, error: friendlyDatabaseError(runMessage) };
   }
 
   const readingRows = input.flats.map((flat) => {
@@ -589,7 +619,7 @@ export async function createElectricityBillingRun(
 
   if (readingsError) {
     await supabase.from("electricity_billing_runs").delete().eq("id", run.id);
-    return { ok: false, error: readingsError.message };
+    return { ok: false, error: friendlyDatabaseError(readingsError.message) };
   }
 
   return { ok: true, billingRunId: run.id, preview };
@@ -609,8 +639,35 @@ export async function createElectricityReading(
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.flatId) return { ok: false, error: "Select a flat." };
   if (!input.readingDate) return { ok: false, error: "Reading date is required." };
+  if (
+    !Number.isFinite(input.previousReading) ||
+    !Number.isFinite(input.currentReading) ||
+    input.previousReading < 0 ||
+    input.currentReading < 0
+  ) {
+    return { ok: false, error: "Meter readings must be 0 or more." };
+  }
   if (input.currentReading < input.previousReading) {
     return { ok: false, error: "Current reading must be ≥ previous reading." };
+  }
+  if (
+    input.billAmount != null &&
+    (!Number.isFinite(input.billAmount) || input.billAmount < 0)
+  ) {
+    return { ok: false, error: "Bill amount cannot be negative." };
+  }
+
+  const { data: existing } = await supabase
+    .from("electricity_readings")
+    .select("id")
+    .eq("flat_id", input.flatId)
+    .eq("reading_date", input.readingDate)
+    .limit(1);
+  if (existing && existing.length > 0) {
+    return {
+      ok: false,
+      error: "A reading already exists for this flat on that date.",
+    };
   }
 
   const { data, error } = await supabase
@@ -630,7 +687,10 @@ export async function createElectricityReading(
     .single();
 
   if (error || !data) {
-    return { ok: false, error: error?.message ?? "Could not save reading." };
+    return {
+      ok: false,
+      error: friendlyDatabaseError(error?.message ?? "Could not save reading."),
+    };
   }
 
   return { ok: true, id: data.id };

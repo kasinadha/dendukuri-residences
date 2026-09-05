@@ -34,11 +34,11 @@ export default function PaymentVoidButton({
     ].join("\n");
 
     const confirmed = window.confirm(
-      `Void and permanently delete this payment?\n\n${summary}\n\nThis removes the payment and receipt. Monthly dues will recalculate. Type OK in the next prompt to confirm.`
+      `Void this payment?\n\n${summary}\n\nThe payment and receipt stay in history as voided. Dues will recalculate, and a deposit/advance will reverse deposit paid. Type VOID in the next prompt to confirm.`
     );
     if (!confirmed) return;
 
-    const typed = window.prompt('Type VOID to confirm deletion:');
+    const typed = window.prompt("Type VOID to confirm:");
     if (typed?.trim().toUpperCase() !== "VOID") {
       setError("Cancelled — type VOID exactly to confirm.");
       return;
@@ -49,12 +49,18 @@ export default function PaymentVoidButton({
     formData.set("confirm", "VOID");
 
     startTransition(async () => {
-      const result = await voidPaymentAction(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await voidPaymentAction(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        router.refresh();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Could not void this payment."
+        );
       }
-      router.refresh();
     });
   }
 
@@ -66,7 +72,7 @@ export default function PaymentVoidButton({
         onClick={handleVoid}
         className="text-sm font-semibold text-red-700 disabled:opacity-60"
       >
-        {pending ? "Removing…" : "Void payment"}
+        {pending ? "Voiding…" : "Void payment"}
       </button>
       {error ? <p className="text-xs text-red-700">{error}</p> : null}
     </div>

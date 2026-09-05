@@ -13,12 +13,15 @@ import {
   computePaymentStatus,
   type PaymentStatus,
 } from "@/lib/payment-status";
-import {
-  formatBillingMonthLabel,
-  parseBillingMonthFromNotes,
-} from "@/lib/receipts";
+import { formatBillingMonthLabel } from "@/lib/receipts";
 import { loadFinesDueByTenancy } from "@/lib/fines";
 import { buildTenantMonthlyCharges } from "@/lib/tenant-charges";
+import {
+  amountsByBillingMonth,
+  loadRentLedgerPayments,
+  waivedAmountForMonth,
+  type LedgerPayment,
+} from "@/lib/payment-attribution";
 
 function currentMonthKey(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -166,20 +169,30 @@ async function loadElectricityDueByFlatId(
       flat_id,
       bill_amount,
       notes,
+      reading_date,
+      created_at,
       electricity_billing_runs ( billing_month )
     `
     );
 
   if (!readingsError && readings) {
-    const byFlat = new Map<string, number>();
+    const byFlat = new Map<string, { bill: number; sort: string }>();
     for (const row of readings) {
       if (readingBillingMonth(row) !== billingMonthKey) continue;
       const bill = roundElectricityDue(num(row.bill_amount));
       if (bill <= 0) continue;
       const flatId = String(row.flat_id);
-      byFlat.set(flatId, (byFlat.get(flatId) ?? 0) + bill);
+      const sort = `${String(row.reading_date ?? "")} ${String(row.created_at ?? "")}`;
+      const prev = byFlat.get(flatId);
+      if (!prev || sort >= prev.sort) {
+        byFlat.set(flatId, { bill, sort });
+      }
     }
-    if (byFlat.size > 0) return byFlat;
+    if (byFlat.size > 0) {
+      return new Map(
+        [...byFlat.entries()].map(([flatId, value]) => [flatId, value.bill])
+      );
+    }
   }
 
   // Admin fallback when readings lack billing month metadata.
@@ -193,19 +206,88 @@ async function loadElectricityDueByFlatId(
   const runIds = runs.map((row) => row.id);
   const { data: linkedReadings, error: linkedError } = await supabase
     .from("electricity_readings")
-    .select("flat_id, bill_amount")
+    .select("flat_id, bill_amount, reading_date, created_at")
     .in("billing_run_id", runIds);
 
   if (linkedError || !linkedReadings) return new Map();
 
-  const byFlat = new Map<string, number>();
+  const byFlat = new Map<string, { bill: number; sort: string }>();
   for (const row of linkedReadings) {
     const bill = roundElectricityDue(num(row.bill_amount));
     if (bill <= 0) continue;
     const flatId = String(row.flat_id);
-    byFlat.set(flatId, (byFlat.get(flatId) ?? 0) + bill);
+    const sort = `${String(row.reading_date ?? "")} ${String(row.created_at ?? "")}`;
+    const prev = byFlat.get(flatId);
+    if (!prev || sort >= prev.sort) {
+      byFlat.set(flatId, { bill, sort });
+    }
   }
-  return byFlat;
+  return new Map(
+    [...byFlat.entries()].map(([flatId, value]) => [flatId, value.bill])
+  );
+}
+
+type PaidBucket = {
+  rentPaid: number;
+  chargesPaid: number;
+  waivedAmount: number;
+  lastPaymentId: string | null;
+  lastPaymentDate: string | null;
+  lastReceiptId: string | null;
+  lastReceiptNumber: string | null;
+};
+
+function accumulateMonthPayments(
+  payments: LedgerPayment[],
+  monthKey: string
+): Map<string, PaidBucket> {
+  const paidByTenancy = new Map<string, PaidBucket>();
+
+  for (const payment of payments) {
+    const attributed = amountsByBillingMonth(payment).get(monthKey) ?? 0;
+    const waivedAmt = waivedAmountForMonth(payment, monthKey);
+    if (attributed <= 0 && waivedAmt <= 0) continue;
+
+    const prev = paidByTenancy.get(payment.tenancyId) ?? {
+      rentPaid: 0,
+      chargesPaid: 0,
+      waivedAmount: 0,
+      lastPaymentId: null,
+      lastPaymentDate: null,
+      lastReceiptId: null,
+      lastReceiptNumber: null,
+    };
+
+    if (payment.paymentType === "maintenance") prev.chargesPaid += attributed;
+    else prev.rentPaid += attributed;
+    prev.waivedAmount += waivedAmt;
+
+    if (
+      !prev.lastPaymentDate ||
+      payment.paymentDate >= prev.lastPaymentDate
+    ) {
+      prev.lastPaymentId = payment.id;
+      prev.lastPaymentDate = payment.paymentDate;
+      prev.lastReceiptId = payment.lastReceiptId;
+      prev.lastReceiptNumber = payment.lastReceiptNumber;
+    }
+
+    paidByTenancy.set(payment.tenancyId, prev);
+  }
+
+  return paidByTenancy;
+}
+
+function monthCollectionStatus(
+  totalDue: number,
+  amountPaid: number,
+  waivedAmount: number,
+  outstanding: number
+): PaymentStatus {
+  if (outstanding <= 0 && waivedAmount > 0 && amountPaid <= 0) {
+    return "waived";
+  }
+  return computePaymentStatus(totalDue, amountPaid + waivedAmount);
 }
 
 function buildMonthlyDuesLines(input: {
@@ -298,11 +380,13 @@ export async function getMonthlyDuesSummary(
   const monthKey = billingMonthKey?.trim() || currentMonthKey();
   const nowKey = currentMonthKey();
 
-  const [tenancyRows, electricityByFlatId, finesByTenancy] = await Promise.all([
-    loadActiveTenancies(supabase),
-    loadElectricityDueByFlatId(supabase, monthKey),
-    loadFinesDueByTenancy(supabase, monthKey),
-  ]);
+  const [tenancyRows, electricityByFlatId, finesByTenancy, ledgerPayments] =
+    await Promise.all([
+      loadActiveTenancies(supabase),
+      loadElectricityDueByFlatId(supabase, monthKey),
+      loadFinesDueByTenancy(supabase, monthKey),
+      loadRentLedgerPayments(supabase),
+    ]);
   const billable = tenancyRows.filter((row) =>
     tenancyIncludedInMonthlyLedger(
       {
@@ -314,79 +398,7 @@ export async function getMonthlyDuesSummary(
     )
   );
 
-  const { data: paymentRows } = await supabase
-    .from("payments")
-    .select(
-      `
-      id,
-      tenancy_id,
-      amount_paid,
-      status,
-      payment_date,
-      payment_type,
-      notes,
-      receipts ( id, receipt_number )
-    `
-    )
-    .in("payment_type", ["rent", "maintenance"]);
-
-  const paidByTenancy = new Map<
-    string,
-    {
-      rentPaid: number;
-      chargesPaid: number;
-      lastPaymentId: string | null;
-      lastPaymentDate: string | null;
-      lastReceiptId: string | null;
-      lastReceiptNumber: string | null;
-      waived: boolean;
-    }
-  >();
-
-  for (const payment of paymentRows ?? []) {
-    const { billingMonthKey: key } = parseBillingMonthFromNotes(payment.notes);
-    const effectiveKey =
-      key ??
-      (typeof payment.payment_date === "string"
-        ? payment.payment_date.slice(0, 7)
-        : null);
-    if (effectiveKey !== monthKey) continue;
-
-    const tenancyId = payment.tenancy_id as string;
-    const prev = paidByTenancy.get(tenancyId) ?? {
-      rentPaid: 0,
-      chargesPaid: 0,
-      lastPaymentId: null,
-      lastPaymentDate: null,
-      lastReceiptId: null,
-      lastReceiptNumber: null,
-      waived: false,
-    };
-
-    const paid = num(payment.amount_paid);
-    const type = String(payment.payment_type ?? "rent").toLowerCase();
-    if (type === "maintenance") prev.chargesPaid += paid;
-    else prev.rentPaid += paid;
-
-    if ((payment.status ?? "").toLowerCase() === "waived") prev.waived = true;
-
-    const receipt = unwrapOne(
-      payment.receipts as
-        | { id: string; receipt_number: string }
-        | { id: string; receipt_number: string }[]
-        | null
-    );
-
-    const paymentDate = String(payment.payment_date ?? "");
-    if (!prev.lastPaymentDate || paymentDate >= prev.lastPaymentDate) {
-      prev.lastPaymentId = payment.id;
-      prev.lastPaymentDate = paymentDate;
-      prev.lastReceiptId = receipt?.id ?? null;
-      prev.lastReceiptNumber = receipt?.receipt_number ?? null;
-    }
-
-    paidByTenancy.set(tenancyId, prev);
-  }
+  const paidByTenancy = accumulateMonthPayments(ledgerPayments, monthKey);
 
   const rows: MonthlyDuesLedgerRow[] = billable
     .map((row) => {
@@ -440,14 +452,18 @@ export async function getMonthlyDuesSummary(
     const paidInfo = paidByTenancy.get(row.id);
     const rentPaid = paidInfo?.rentPaid ?? 0;
     const chargesPaid = paidInfo?.chargesPaid ?? 0;
+    const waivedAmount = paidInfo?.waivedAmount ?? 0;
     const amountPaid = rentPaid + chargesPaid;
 
-    allocatePaymentsAcrossLines(lines, amountPaid);
+    allocatePaymentsAcrossLines(lines, amountPaid + waivedAmount);
     const outstanding = lines.reduce((sum, line) => sum + line.outstanding, 0);
 
-    let status: PaymentStatus = paidInfo?.waived
-      ? "waived"
-      : computePaymentStatus(totalDue, amountPaid);
+    let status: PaymentStatus = monthCollectionStatus(
+      totalDue,
+      amountPaid,
+      waivedAmount,
+      outstanding
+    );
     status = applyOverdueIfNeeded(status, monthKey, nowKey);
 
     return {
@@ -469,7 +485,7 @@ export async function getMonthlyDuesSummary(
       rentPaid,
       chargesPaid,
       amountPaid,
-      outstanding: status === "waived" ? 0 : outstanding,
+      outstanding,
       status,
       lastPaymentId: paidInfo?.lastPaymentId ?? null,
       lastReceiptId: paidInfo?.lastReceiptId ?? null,
@@ -571,68 +587,17 @@ export async function getTenancyMonthlyDueRow(
   if (!tenancyIncludedInMonthlyLedger(tenancyDates, monthKey)) return null;
 
   const nowKey = currentMonthKey();
-  const [electricityByFlatId, finesByTenancy] = await Promise.all([
-    loadElectricityDueByFlatId(supabase, monthKey),
-    loadFinesDueByTenancy(supabase, monthKey),
-  ]);
+  const [electricityByFlatId, finesByTenancy, ledgerPayments] =
+    await Promise.all([
+      loadElectricityDueByFlatId(supabase, monthKey),
+      loadFinesDueByTenancy(supabase, monthKey),
+      loadRentLedgerPayments(supabase, { tenancyId }),
+    ]);
   const flat = unwrapOne(row.flats);
   const tenant = unwrapOne(row.tenants);
-
-  const { data: paymentRows } = await supabase
-    .from("payments")
-    .select(
-      `
-      id,
-      tenancy_id,
-      amount_paid,
-      status,
-      payment_date,
-      payment_type,
-      notes,
-      receipts ( id, receipt_number )
-    `
-    )
-    .eq("tenancy_id", tenancyId)
-    .in("payment_type", ["rent", "maintenance"]);
-
-  let rentPaid = 0;
-  let chargesPaid = 0;
-  let lastPaymentId: string | null = null;
-  let lastPaymentDate: string | null = null;
-  let lastReceiptId: string | null = null;
-  let lastReceiptNumber: string | null = null;
-  let waived = false;
-
-  for (const payment of paymentRows ?? []) {
-    const { billingMonthKey: key } = parseBillingMonthFromNotes(payment.notes);
-    const effectiveKey =
-      key ??
-      (typeof payment.payment_date === "string"
-        ? payment.payment_date.slice(0, 7)
-        : null);
-    if (effectiveKey !== monthKey) continue;
-
-    const paid = num(payment.amount_paid);
-    const type = String(payment.payment_type ?? "rent").toLowerCase();
-    if (type === "maintenance") chargesPaid += paid;
-    else rentPaid += paid;
-
-    if ((payment.status ?? "").toLowerCase() === "waived") waived = true;
-
-    const receipt = unwrapOne(
-      payment.receipts as
-        | { id: string; receipt_number: string }
-        | { id: string; receipt_number: string }[]
-        | null
-    );
-    const paymentDate = String(payment.payment_date ?? "");
-    if (!lastPaymentDate || paymentDate >= lastPaymentDate) {
-      lastPaymentId = payment.id;
-      lastPaymentDate = paymentDate;
-      lastReceiptId = receipt?.id ?? null;
-      lastReceiptNumber = receipt?.receipt_number ?? null;
-    }
-  }
+  const paidInfo = accumulateMonthPayments(ledgerPayments, monthKey).get(
+    tenancyId
+  );
 
   const owesDues = tenancyOwesMonthlyDues(tenancyDates, monthKey);
   const charges = buildTenantMonthlyCharges({
@@ -674,14 +639,20 @@ export async function getTenancyMonthlyDueRow(
     electricityCharge,
   });
   const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
+  const rentPaid = paidInfo?.rentPaid ?? 0;
+  const chargesPaid = paidInfo?.chargesPaid ?? 0;
+  const waivedAmount = paidInfo?.waivedAmount ?? 0;
   const amountPaid = rentPaid + chargesPaid;
 
-  allocatePaymentsAcrossLines(lines, amountPaid);
+  allocatePaymentsAcrossLines(lines, amountPaid + waivedAmount);
   const outstanding = lines.reduce((sum, line) => sum + line.outstanding, 0);
 
-  let status: PaymentStatus = waived
-    ? "waived"
-    : computePaymentStatus(totalDue, amountPaid);
+  let status: PaymentStatus = monthCollectionStatus(
+    totalDue,
+    amountPaid,
+    waivedAmount,
+    outstanding
+  );
   status = applyOverdueIfNeeded(status, monthKey, nowKey);
 
   return {
@@ -703,11 +674,11 @@ export async function getTenancyMonthlyDueRow(
     rentPaid,
     chargesPaid,
     amountPaid,
-    outstanding: status === "waived" ? 0 : outstanding,
+    outstanding,
     status,
-    lastPaymentId,
-    lastReceiptId,
-    lastReceiptNumber,
-    lastPaymentDate,
+    lastPaymentId: paidInfo?.lastPaymentId ?? null,
+    lastReceiptId: paidInfo?.lastReceiptId ?? null,
+    lastReceiptNumber: paidInfo?.lastReceiptNumber ?? null,
+    lastPaymentDate: paidInfo?.lastPaymentDate ?? null,
   };
 }
