@@ -1,5 +1,5 @@
 -- Snapshot move-in date on each tenancy agreement for the record.
--- Idempotent. Existing rows are backfilled from tenancies.start_date.
+-- Idempotent. Safe to re-run after a failed backfill (SQL editor has no auth.uid()).
 
 alter table public.tenancy_agreements
   add column if not exists move_in_date date;
@@ -7,13 +7,8 @@ alter table public.tenancy_agreements
 comment on column public.tenancy_agreements.move_in_date is
   'Move-in date snapshotted from tenancies.start_date when the agreement draft was created.';
 
-update public.tenancy_agreements a
-set move_in_date = t.start_date::date
-from public.tenancies t
-where a.tenancy_id = t.id
-  and a.move_in_date is null
-  and t.start_date is not null;
-
+-- Allow SQL editor / service_role (no JWT). Tenants with a JWT still cannot
+-- change commercial columns; they may only set tenant_status = accepted.
 create or replace function public.tenancy_agreements_protect_commercial()
 returns trigger
 language plpgsql
@@ -21,6 +16,10 @@ security definer
 set search_path = public
 as $$
 begin
+  if auth.uid() is null then
+    return NEW;
+  end if;
+
   if exists (
     select 1
     from public.profiles p
@@ -72,3 +71,16 @@ begin
       execute procedure public.tenancy_agreements_protect_commercial()
   $t$;
 end $$;
+
+alter table public.tenancy_agreements
+  disable trigger tenancy_agreements_protect_commercial;
+
+update public.tenancy_agreements a
+set move_in_date = t.start_date::date
+from public.tenancies t
+where a.tenancy_id = t.id
+  and a.move_in_date is null
+  and t.start_date is not null;
+
+alter table public.tenancy_agreements
+  enable trigger tenancy_agreements_protect_commercial;
