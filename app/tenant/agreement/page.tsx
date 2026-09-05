@@ -1,6 +1,7 @@
 import TenantAgreementAcceptForm from "@/components/tenant/TenantAgreementAcceptForm";
 import { requireTenant } from "@/lib/auth";
 import { getLatestAgreementForTenancy } from "@/lib/agreements";
+import { formatDisplayDate } from "@/lib/receipts";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 export default async function TenantAgreementPage() {
@@ -17,8 +18,8 @@ export default async function TenantAgreementPage() {
         Rental terms
       </h2>
       <p className="mt-2 max-w-2xl text-slate-500">
-        Confirm rent, maintenance, other charges, deposit, and the house rules
-        for Flat {ctx?.flatNumber ?? "—"}.
+        Confirm rent, maintenance, other charges, deposit, move-in date, and the
+        house rules for Flat {ctx?.flatNumber ?? "—"}.
       </p>
 
       {!agreement || agreement.adminStatus !== "approved" ? (
@@ -32,9 +33,18 @@ export default async function TenantAgreementPage() {
             <h3 className="text-lg font-bold text-slate-900">
               {agreement.templateTitle ?? "Rental agreement"}
             </h3>
-            {agreement.templateVersion ? (
+            {(agreement.templateVersion || agreement.moveInDate) ? (
               <p className="mt-1 text-xs text-slate-500">
-                Version {agreement.templateVersion}
+                {[
+                  agreement.templateVersion
+                    ? `Version ${agreement.templateVersion}`
+                    : null,
+                  agreement.moveInDate
+                    ? `Move-in ${formatDisplayDate(agreement.moveInDate)}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
             ) : null}
             <div className="mt-4">{agreement.templateBody}</div>

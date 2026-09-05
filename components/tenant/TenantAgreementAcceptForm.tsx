@@ -4,7 +4,7 @@ import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { tenantAcceptAgreementAction } from "@/app/tenant/actions";
 import type { TenancyAgreement } from "@/lib/agreements";
-import { formatInr } from "@/lib/receipts";
+import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default function TenantAgreementAcceptForm({
   agreement,
@@ -35,6 +35,15 @@ export default function TenantAgreementAcceptForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm sm:grid-cols-2">
+        <p>
+          <span className="text-slate-500">Move-in date</span>
+          <br />
+          <span className="font-semibold text-slate-900">
+            {agreement.moveInDate
+              ? formatDisplayDate(agreement.moveInDate)
+              : "Not recorded"}
+          </span>
+        </p>
         <p>
           <span className="text-slate-500">Monthly rent</span>
           <br />

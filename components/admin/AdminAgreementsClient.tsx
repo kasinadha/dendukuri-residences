@@ -12,7 +12,7 @@ import {
 } from "@/app/admin/agreements/actions";
 import type { AgreementTemplate, TenancyAgreement } from "@/lib/agreements";
 import { DEFAULT_AGREEMENT_BODY, DEFAULT_AGREEMENT_TITLE } from "@/lib/agreements";
-import { formatInr } from "@/lib/receipts";
+import { formatDisplayDate, formatInr } from "@/lib/receipts";
 import type { TenantFine } from "@/lib/fines";
 
 function statusLabel(row: TenancyAgreement): string {
@@ -184,7 +184,11 @@ export default function AdminAgreementsClient({
                         Flat {row.flatNumber} · {row.tenantName}
                       </p>
                       <p className="mt-1 text-sm text-slate-500">
-                        Rent {formatInr(row.monthlyRent)} · maint{" "}
+                        Move-in{" "}
+                        {row.moveInDate
+                          ? formatDisplayDate(row.moveInDate)
+                          : "not recorded"}{" "}
+                        · rent {formatInr(row.monthlyRent)} · maint{" "}
                         {formatInr(row.maintenanceCharge)} · deposit paid{" "}
                         {formatInr(row.depositPaid)}
                         {row.templateVersion ? ` · terms v${row.templateVersion}` : ""}

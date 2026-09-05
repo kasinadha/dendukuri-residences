@@ -495,6 +495,10 @@ export async function updateTenancyMoveInDate(
     .eq("id", tenancyId);
 
   if (error) return { ok: false, error: error.message };
+
+  const { generateDraftAgreementForTenancy } = await import("@/lib/agreements");
+  await generateDraftAgreementForTenancy(supabase, tenancyId);
+
   return { ok: true };
 }
 

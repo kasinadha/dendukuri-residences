@@ -19,7 +19,7 @@ export const DEFAULT_AGREEMENT_TITLE =
 export const DEFAULT_AGREEMENT_BODY = `This rental agreement is between the Landlord (${PROPERTY_NAME}, Bengaluru) and the Tenant named below, for the flat listed in the commercial terms.
 
 1. Premises and term
-The Tenant occupies the stated flat for residential use only. The arrangement follows the usual Bengaluru practice of an 11-month leave-and-licence style term, renewable by mutual consent.
+The Tenant occupies the stated flat for residential use only, from the move-in date recorded in the commercial terms. The arrangement follows the usual Bengaluru practice of an 11-month leave-and-licence style term, renewable by mutual consent.
 
 2. Rent, maintenance, and other charges
 The Tenant agrees the monthly rent, maintenance, parking, washing-machine, and other charges shown in the commercial terms. Rent and monthly charges are due by the 5th of each calendar month unless the Landlord agrees otherwise in writing. Electricity is billed separately from meter readings and is not house rent.
@@ -74,6 +74,7 @@ export type TenancyAgreement = {
   flatNumber: string;
   tenantName: string;
   phone: string | null;
+  moveInDate: string | null;
   monthlyRent: number;
   maintenanceCharge: number;
   carParkingCharge: number;
@@ -96,6 +97,48 @@ function num(value: unknown): number {
   if (value == null || value === "") return 0;
   const n = typeof value === "string" ? Number(value) : Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** YYYY-MM-DD from a date column or ISO timestamp. */
+function asDateOnly(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(
+      value
+    );
+  }
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function agreementInsertPayload(
+  snapshot: TenancySnapshot,
+  templateId: string
+) {
+  return {
+    tenancy_id: snapshot.tenancyId,
+    template_id: templateId,
+    flat_number: snapshot.flatNumber,
+    tenant_name: snapshot.tenantName,
+    move_in_date: snapshot.moveInDate,
+    monthly_rent: snapshot.monthlyRent,
+    maintenance_charge: snapshot.maintenanceCharge,
+    car_parking_charge: snapshot.carParkingCharge,
+    washing_machine_charge: snapshot.washingMachineCharge,
+    other_monthly_charge: snapshot.otherMonthlyCharge,
+    other_charges_notes: snapshot.otherChargesNotes,
+    deposit_amount: snapshot.depositAmount,
+    deposit_paid: snapshot.depositPaid,
+    admin_status: "draft" as const,
+    tenant_status: "pending" as const,
+  };
+}
+
+function agreementSchemaError(message: string): string | null {
+  if (/move_in_date|schema cache/i.test(message)) {
+    return "Move-in date column is not ready. Run supabase/migrations/20260909_agreement_move_in_date.sql in Supabase.";
+  }
+  return null;
 }
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
@@ -129,6 +172,7 @@ type TenancySnapshot = {
   tenancyId: string;
   flatNumber: string;
   tenantName: string;
+  moveInDate: string | null;
   monthlyRent: number;
   maintenanceCharge: number;
   carParkingCharge: number;
@@ -143,6 +187,7 @@ function snapshotEquals(
   agreement: Pick<
     TenancyAgreement,
     | "templateId"
+    | "moveInDate"
     | "monthlyRent"
     | "maintenanceCharge"
     | "carParkingCharge"
@@ -157,6 +202,7 @@ function snapshotEquals(
 ): boolean {
   return (
     agreement.templateId === templateId &&
+    (agreement.moveInDate ?? "") === (snapshot.moveInDate ?? "") &&
     agreement.monthlyRent === snapshot.monthlyRent &&
     agreement.maintenanceCharge === snapshot.maintenanceCharge &&
     agreement.carParkingCharge === snapshot.carParkingCharge &&
@@ -260,6 +306,7 @@ async function loadActiveTenancySnapshots(
       `
       id,
       status,
+      start_date,
       monthly_rent,
       deposit_amount,
       security_deposit,
@@ -301,6 +348,7 @@ async function loadActiveTenancySnapshots(
         tenancyId: row.id,
         flatNumber: flat?.flat_number?.trim() || "—",
         tenantName: tenant?.full_name?.trim() || "Tenant",
+        moveInDate: asDateOnly(row.start_date),
         monthlyRent: num(row.monthly_rent),
         maintenanceCharge: charges.maintenanceCharge,
         carParkingCharge: charges.carParkingCharge,
@@ -325,6 +373,7 @@ async function loadLatestAgreementsByTenancy(
       template_id,
       flat_number,
       tenant_name,
+      move_in_date,
       monthly_rent,
       maintenance_charge,
       car_parking_charge,
@@ -375,27 +424,18 @@ export async function generateDraftAgreementForTenancy(
 
   const { data, error } = await supabase
     .from("tenancy_agreements")
-    .insert({
-      tenancy_id: snapshot.tenancyId,
-      template_id: template.id,
-      flat_number: snapshot.flatNumber,
-      tenant_name: snapshot.tenantName,
-      monthly_rent: snapshot.monthlyRent,
-      maintenance_charge: snapshot.maintenanceCharge,
-      car_parking_charge: snapshot.carParkingCharge,
-      washing_machine_charge: snapshot.washingMachineCharge,
-      other_monthly_charge: snapshot.otherMonthlyCharge,
-      other_charges_notes: snapshot.otherChargesNotes,
-      deposit_amount: snapshot.depositAmount,
-      deposit_paid: snapshot.depositPaid,
-      admin_status: "draft",
-      tenant_status: "pending",
-    })
+    .insert(agreementInsertPayload(snapshot, template.id))
     .select("id")
     .single();
 
   if (error || !data) {
-    return { ok: false, error: error?.message ?? "Could not generate agreement." };
+    return {
+      ok: false,
+      error:
+        agreementSchemaError(error?.message ?? "") ??
+        error?.message ??
+        "Could not generate agreement.",
+    };
   }
   return { ok: true, id: data.id };
 }
@@ -419,22 +459,7 @@ export async function generateDraftAgreementsForActiveTenancies(
   if (rows.length === 0) return { created: 0, skipped: snapshots.length };
 
   const { error } = await supabase.from("tenancy_agreements").insert(
-    rows.map((snapshot) => ({
-      tenancy_id: snapshot.tenancyId,
-      template_id: template.id,
-      flat_number: snapshot.flatNumber,
-      tenant_name: snapshot.tenantName,
-      monthly_rent: snapshot.monthlyRent,
-      maintenance_charge: snapshot.maintenanceCharge,
-      car_parking_charge: snapshot.carParkingCharge,
-      washing_machine_charge: snapshot.washingMachineCharge,
-      other_monthly_charge: snapshot.otherMonthlyCharge,
-      other_charges_notes: snapshot.otherChargesNotes,
-      deposit_amount: snapshot.depositAmount,
-      deposit_paid: snapshot.depositPaid,
-      admin_status: "draft",
-      tenant_status: "pending",
-    }))
+    rows.map((snapshot) => agreementInsertPayload(snapshot, template.id))
   );
 
   if (error) return { created: 0, skipped: snapshots.length };
@@ -454,6 +479,7 @@ export async function listTenancyAgreements(
         template_id,
         flat_number,
         tenant_name,
+        move_in_date,
         monthly_rent,
         maintenance_charge,
         car_parking_charge,
@@ -520,6 +546,7 @@ export async function getLatestAgreementForTenancy(
       template_id,
       flat_number,
       tenant_name,
+      move_in_date,
       monthly_rent,
       maintenance_charge,
       car_parking_charge,
@@ -787,6 +814,7 @@ function mapAgreementRow(
     template_id: string;
     flat_number: string | null;
     tenant_name: string | null;
+    move_in_date?: string | null;
     monthly_rent: number | string | null;
     maintenance_charge: number | string | null;
     car_parking_charge: number | string | null;
@@ -816,6 +844,7 @@ function mapAgreementRow(
     flatNumber: row.flat_number?.trim() || "—",
     tenantName: row.tenant_name?.trim() || "Tenant",
     phone: phone?.trim() || null,
+    moveInDate: asDateOnly(row.move_in_date),
     monthlyRent: num(row.monthly_rent),
     maintenanceCharge: num(row.maintenance_charge),
     carParkingCharge: num(row.car_parking_charge),
