@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import {
   fetchTenancyDuesBreakdownAction,
   recordRentPayment,
@@ -9,8 +9,14 @@ import {
 import AccountSelectField from "@/components/admin/AccountSelectField";
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import { computePaymentStatus } from "@/lib/payment-status";
-import type { DuesBreakdown } from "@/lib/dues-breakdown";
+import {
+  applyAdditionalPaymentToBreakdown,
+  breakdownPaymentAmountDefaults,
+  toOutstandingOnlyBreakdown,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
 import type { PaymentAccountOption } from "@/lib/payment-accounts";
+import { formatInr } from "@/lib/receipts";
 
 export type TenancyOption = {
   id: string;
@@ -19,6 +25,8 @@ export type TenancyOption = {
   flatNumber: string;
   tenantName: string;
   monthlyRent: number | null;
+  depositAmount: number | null;
+  depositPaid: number | null;
   suggestedReceiverAccountId?: string | null;
 };
 
@@ -50,28 +58,42 @@ function todayIsoDate(): string {
   }).format(new Date());
 }
 
+function paymentAmountDefaults(breakdown: DuesBreakdown) {
+  return breakdownPaymentAmountDefaults(breakdown);
+}
+
 type Props = {
   tenancies: TenancyOption[];
   accounts: PaymentAccountOption[];
+  defaultTenancyId?: string;
+  defaultBillingMonth?: string;
 };
 
-export default function RecordPaymentForm({ tenancies, accounts }: Props) {
+export default function RecordPaymentForm({
+  tenancies,
+  accounts,
+  defaultTenancyId,
+  defaultBillingMonth,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [tenancyId, setTenancyId] = useState(tenancies[0]?.id ?? "");
+  const initialTenancy =
+    tenancies.find((t) => t.id === defaultTenancyId) ?? tenancies[0];
+  const [tenancyId, setTenancyId] = useState(initialTenancy?.id ?? "");
   const [receiverAccountId, setReceiverAccountId] = useState(
-    tenancies[0]?.suggestedReceiverAccountId ?? ""
+    initialTenancy?.suggestedReceiverAccountId ?? ""
   );
   const selected = tenancies.find((t) => t.id === tenancyId) ?? tenancies[0];
-  const [amountDue, setAmountDue] = useState(
-    selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
+  const [amountDue, setAmountDue] = useState("");
+  const [amountPaid, setAmountPaid] = useState("");
+  const [billingMonth, setBillingMonth] = useState(
+    defaultBillingMonth ?? currentYearMonth()
   );
-  const [amountPaid, setAmountPaid] = useState(
-    selected?.monthlyRent != null ? String(selected.monthlyRent) : ""
+  const [paymentCategory, setPaymentCategory] = useState<"dues" | "deposit">(
+    "dues"
   );
-  const [billingMonth, setBillingMonth] = useState(currentYearMonth());
   const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
   const [breakdownError, setBreakdownError] = useState("");
 
@@ -81,9 +103,53 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
     Number.isFinite(dueNum) && Number.isFinite(paidNum)
       ? computePaymentStatus(dueNum, paidNum)
       : null;
+  const previewBreakdown = useMemo(() => {
+    if (!breakdown) return null;
+    if (!Number.isFinite(paidNum) || paidNum <= 0) {
+      return toOutstandingOnlyBreakdown(breakdown);
+    }
+    return toOutstandingOnlyBreakdown(
+      applyAdditionalPaymentToBreakdown(breakdown, paidNum)
+    );
+  }, [breakdown, paidNum]);
+  const electricityOnlyHint = useMemo(() => {
+    if (!breakdown) return null;
+    const view = toOutstandingOnlyBreakdown(breakdown);
+    const nonElectricOutstanding = view.lines
+      .filter((line) => line.key !== "electricity")
+      .reduce((sum, line) => sum + line.outstanding, 0);
+    const electricity = view.lines.find((line) => line.key === "electricity");
+    if (
+      nonElectricOutstanding <= 0 &&
+      electricity &&
+      electricity.outstanding > 0
+    ) {
+      return `Only electricity is outstanding for this month (${formatInr(electricity.outstanding)}). Record that amount to generate a receipt for the electricity portion.`;
+    }
+    return null;
+  }, [breakdown]);
 
   useEffect(() => {
-    if (!tenancyId || !selected?.flatId || !billingMonth) return;
+    if (
+      paymentCategory !== "dues" ||
+      !tenancyId ||
+      !selected?.flatId ||
+      !billingMonth
+    ) {
+      if (paymentCategory === "deposit") {
+        setBreakdown(null);
+        setBreakdownError("");
+        const outstanding =
+          selected?.depositAmount != null && selected.depositPaid != null
+            ? Math.max(0, selected.depositAmount - selected.depositPaid)
+            : null;
+        const value =
+          outstanding != null && outstanding > 0 ? String(outstanding) : "";
+        setAmountDue(value);
+        setAmountPaid(value);
+      }
+      return;
+    }
     const formData = new FormData();
     formData.set("tenancy_id", tenancyId);
     formData.set("flat_id", selected.flatId);
@@ -98,22 +164,23 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
       }
       setBreakdownError("");
       setBreakdown(result.breakdown);
-      setAmountDue(String(result.breakdown.totalOutstanding || result.breakdown.totalDue));
-      setAmountPaid(String(result.breakdown.totalOutstanding || result.breakdown.totalDue));
+      const defaults = paymentAmountDefaults(result.breakdown);
+      setAmountDue(defaults.amountDue);
+      setAmountPaid(defaults.amountPaid);
     });
     return () => {
       cancelled = true;
     };
-  }, [tenancyId, selected?.flatId, billingMonth]);
+  }, [tenancyId, selected?.flatId, selected?.depositAmount, selected?.depositPaid, billingMonth, paymentCategory]);
 
   function onTenancyChange(id: string) {
     setTenancyId(id);
     const next = tenancies.find((t) => t.id === id);
     setReceiverAccountId(next?.suggestedReceiverAccountId ?? "");
-    if (next?.monthlyRent != null) {
-      setAmountDue(String(next.monthlyRent));
-      setAmountPaid(String(next.monthlyRent));
-    }
+    setAmountDue("");
+    setAmountPaid("");
+    setBreakdown(null);
+    setBreakdownError("");
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -141,8 +208,7 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
   if (tenancies.length === 0) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-        No active tenancies found. Confirmed/reserved units (before move-in)
-        are excluded from rent recording.
+        No tenancies available for payment recording this month.
       </div>
     );
   }
@@ -155,7 +221,8 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
     >
       <h3 className="text-lg font-bold text-slate-900">Record Payment</h3>
       <p className="mt-1 text-sm text-slate-500">
-        Against an active tenancy. Issues a unique receipt automatically.
+        Active tenancies and vacated tenants with outstanding final-month dues.
+        Issues a unique receipt automatically.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -172,8 +239,8 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
           >
             {tenancies.map((t) => (
               <option key={t.id} value={t.id}>
-                Flat {t.flatNumber} — {t.tenantName}
-                {t.monthlyRent != null ? ` (₹${t.monthlyRent})` : ""}
+                {t.label}
+                {t.monthlyRent != null ? ` · rent ₹${t.monthlyRent}` : ""}
               </option>
             ))}
           </select>
@@ -194,9 +261,42 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
           </p>
         </div>
 
+        <label className="block sm:col-span-2">
+          <span className="mb-2 block text-sm font-semibold text-slate-700">
+            Payment for
+          </span>
+          <select
+            name="payment_category"
+            value={paymentCategory}
+            onChange={(e) =>
+              setPaymentCategory(
+                e.target.value === "deposit" ? "deposit" : "dues"
+              )
+            }
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+          >
+            <option value="dues">Monthly dues (rent, charges, electricity)</option>
+            <option value="deposit">Deposit / advance</option>
+          </select>
+        </label>
+
+        {paymentCategory === "deposit" ? (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950 sm:col-span-2">
+            Deposit is tracked separately from monthly rent. Agreed{" "}
+            {selected?.depositAmount != null
+              ? formatInr(selected.depositAmount)
+              : "—"}
+            , paid{" "}
+            {selected?.depositPaid != null
+              ? formatInr(selected.depositPaid)
+              : "—"}
+            .
+          </div>
+        ) : null}
+
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Billing month
+            Due month
           </span>
           <input
             type="month"
@@ -206,6 +306,10 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
             onChange={(e) => setBillingMonth(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Rent due month (5th). For an electricity-only payment, use the meter
+            usage month — usually last month.
+          </span>
         </label>
 
         <label className="block">
@@ -226,11 +330,10 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
             Amount due (₹)
           </span>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             name="amount_due"
             required
-            min={0}
-            step={1}
             value={amountDue}
             onChange={(e) => setAmountDue(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
@@ -242,11 +345,10 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
             Amount paid (₹)
           </span>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             name="amount_paid"
             required
-            min={0}
-            step={1}
             value={amountPaid}
             onChange={(e) => setAmountPaid(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
@@ -315,11 +417,23 @@ export default function RecordPaymentForm({ tenancies, accounts }: Props) {
         </label>
       </div>
 
-      {breakdown ? (
+      {electricityOnlyHint ? (
+        <p className="mt-6 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          {electricityOnlyHint}
+        </p>
+      ) : null}
+
+      {breakdown?.infoMessage ? (
+        <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {breakdown.infoMessage}
+        </p>
+      ) : null}
+
+      {previewBreakdown && paymentCategory === "dues" ? (
         <div className="mt-6">
           <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
           <div className="mt-3">
-            <DuesBreakdownTable breakdown={breakdown} />
+            <DuesBreakdownTable breakdown={previewBreakdown} />
           </div>
         </div>
       ) : breakdownError ? (

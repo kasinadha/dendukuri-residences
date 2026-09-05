@@ -6,9 +6,15 @@ export const PAYMENT_STATUSES = [
   "paid",
   "overdue",
   "waived",
+  "voided",
 ] as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export function isVoidedPaymentStatus(status: string | null | undefined): boolean {
+  const s = (status ?? "").toLowerCase();
+  return s === "voided" || s === "void";
+}
 
 export function isPaymentStatus(value: string | null | undefined): value is PaymentStatus {
   return PAYMENT_STATUSES.includes(
@@ -23,7 +29,7 @@ export function isPaymentStatus(value: string | null | undefined): value is Paym
 export function computePaymentStatus(
   amountDue: number,
   amountPaid: number
-): Exclude<PaymentStatus, "overdue" | "waived"> {
+): Exclude<PaymentStatus, "overdue" | "waived" | "voided"> {
   const due = Number.isFinite(amountDue) ? amountDue : 0;
   const paid = Number.isFinite(amountPaid) ? amountPaid : 0;
 
@@ -38,7 +44,9 @@ export function applyOverdueIfNeeded(
   billingMonthKey: string,
   currentMonthKey: string
 ): PaymentStatus {
-  if (status === "waived" || status === "paid") return status;
+  if (status === "waived" || status === "paid" || status === "voided") {
+    return status;
+  }
   if (billingMonthKey < currentMonthKey) return "overdue";
   return status;
 }
@@ -55,6 +63,8 @@ export function paymentStatusLabel(status: PaymentStatus): string {
       return "Overdue";
     case "waived":
       return "Waived";
+    case "voided":
+      return "Voided";
     default:
       return status;
   }

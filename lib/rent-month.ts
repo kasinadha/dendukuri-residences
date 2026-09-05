@@ -5,10 +5,15 @@ import {
   computePaymentStatus,
   type PaymentStatus,
 } from "@/lib/payment-status";
+import { formatBillingMonthLabel, parseBillingMonthFromNotes } from "@/lib/receipts";
+import { isMissingColumnError } from "@/lib/money";
 import {
-  formatBillingMonthLabel,
-  parseBillingMonthFromNotes,
-} from "@/lib/receipts";
+  amountsByBillingMonth,
+  isVoidedPaymentStatus,
+  loadRentLedgerPayments,
+  paymentDisplayMonth,
+  waivedAmountForMonth,
+} from "@/lib/payment-attribution";
 
 function currentMonthKey(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -61,6 +66,7 @@ export type PaymentHistoryRow = {
   status: PaymentStatus;
   paymentDate: string;
   paymentMode: string | null;
+  paymentType: string | null;
   transactionReference: string | null;
   receiptId: string | null;
   receiptNumber: string | null;
@@ -113,76 +119,50 @@ export async function getRentMonthSummary(
     isActiveTenancyStatus(row.status)
   );
 
-  const { data: paymentRows } = await supabase
-    .from("payments")
-    .select(
-      `
-      id,
-      tenancy_id,
-      amount_paid,
-      amount_due,
-      status,
-      payment_date,
-      payment_type,
-      notes,
-      receipts ( id, receipt_number )
-    `
-    )
-    .eq("payment_type", "rent");
+  const ledgerPayments = (await loadRentLedgerPayments(supabase)).filter(
+    (row) => row.paymentType === "rent"
+  );
 
   const paidByTenancy = new Map<
     string,
     {
       amountPaid: number;
+      waivedAmount: number;
       lastPaymentId: string | null;
       lastPaymentDate: string | null;
       lastReceiptId: string | null;
       lastReceiptNumber: string | null;
-      waived: boolean;
     }
   >();
 
-  for (const payment of paymentRows ?? []) {
-    const { billingMonthKey: key } = parseBillingMonthFromNotes(payment.notes);
-    const effectiveKey =
-      key ??
-      (typeof payment.payment_date === "string"
-        ? payment.payment_date.slice(0, 7)
-        : null);
-    if (effectiveKey !== monthKey) continue;
+  for (const payment of ledgerPayments) {
+    const attributed = amountsByBillingMonth(payment).get(monthKey) ?? 0;
+    const waivedAmt = waivedAmountForMonth(payment, monthKey);
+    if (attributed <= 0 && waivedAmt <= 0) continue;
 
-    const tenancyId = payment.tenancy_id as string;
-    const prev = paidByTenancy.get(tenancyId) ?? {
+    const prev = paidByTenancy.get(payment.tenancyId) ?? {
       amountPaid: 0,
+      waivedAmount: 0,
       lastPaymentId: null,
       lastPaymentDate: null,
       lastReceiptId: null,
       lastReceiptNumber: null,
-      waived: false,
     };
 
-    prev.amountPaid += num(payment.amount_paid);
-    if ((payment.status ?? "").toLowerCase() === "waived") prev.waived = true;
+    prev.amountPaid += attributed;
+    prev.waivedAmount += waivedAmt;
 
-    const receipt = unwrapOne(
-      payment.receipts as
-        | { id: string; receipt_number: string }
-        | { id: string; receipt_number: string }[]
-        | null
-    );
-
-    const paymentDate = String(payment.payment_date ?? "");
     if (
       !prev.lastPaymentDate ||
-      paymentDate >= prev.lastPaymentDate
+      payment.paymentDate >= prev.lastPaymentDate
     ) {
       prev.lastPaymentId = payment.id;
-      prev.lastPaymentDate = paymentDate;
-      prev.lastReceiptId = receipt?.id ?? null;
-      prev.lastReceiptNumber = receipt?.receipt_number ?? null;
+      prev.lastPaymentDate = payment.paymentDate;
+      prev.lastReceiptId = payment.lastReceiptId;
+      prev.lastReceiptNumber = payment.lastReceiptNumber;
     }
 
-    paidByTenancy.set(tenancyId, prev);
+    paidByTenancy.set(payment.tenancyId, prev);
   }
 
   const rows: RentLedgerRow[] = active.map((row) => {
@@ -191,10 +171,13 @@ export async function getRentMonthSummary(
     const amountDue = num(row.monthly_rent);
     const paidInfo = paidByTenancy.get(row.id);
     const amountPaid = paidInfo?.amountPaid ?? 0;
+    const waivedAmount = paidInfo?.waivedAmount ?? 0;
+    const outstanding = Math.max(0, amountDue - amountPaid - waivedAmount);
 
-    let status: PaymentStatus = paidInfo?.waived
-      ? "waived"
-      : computePaymentStatus(amountDue, amountPaid);
+    let status: PaymentStatus =
+      outstanding <= 0 && waivedAmount > 0 && amountPaid <= 0
+        ? "waived"
+        : computePaymentStatus(amountDue, amountPaid + waivedAmount);
     status = applyOverdueIfNeeded(status, monthKey, nowKey);
 
     return {
@@ -204,8 +187,7 @@ export async function getRentMonthSummary(
       billingMonthKey: monthKey,
       amountDue,
       amountPaid,
-      outstanding:
-        status === "waived" ? 0 : Math.max(0, amountDue - amountPaid),
+      outstanding,
       status,
       lastPaymentId: paidInfo?.lastPaymentId ?? null,
       lastReceiptId: paidInfo?.lastReceiptId ?? null,
@@ -244,10 +226,26 @@ export async function listPaymentHistory(
   const limit = filters.limit ?? 100;
   const nowKey = currentMonthKey();
 
-  const { data, error } = await supabase
-    .from("payments")
-    .select(
-      `
+  const selectWithMonth = `
+      id,
+      tenancy_id,
+      amount_paid,
+      amount_due,
+      status,
+      payment_date,
+      payment_mode,
+      payment_type,
+      transaction_reference,
+      billing_month,
+      notes,
+      tenancies (
+        id,
+        tenants ( full_name ),
+        flats ( flat_number )
+      ),
+      receipts ( id, receipt_number )
+    `;
+  const selectWithoutMonth = `
       id,
       tenancy_id,
       amount_paid,
@@ -264,20 +262,30 @@ export async function listPaymentHistory(
         flats ( flat_number )
       ),
       receipts ( id, receipt_number )
-    `
-    )
-    .order("payment_date", { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 300));
+    `;
 
-  if (error || !data) return [];
+  async function runHistorySelect(select: string) {
+    return supabase
+      .from("payments")
+      .select(select)
+      .order("payment_date", { ascending: false })
+      .limit(Math.min(Math.max(limit, 1), 300));
+  }
+
+  let result = await runHistorySelect(selectWithMonth);
+  if (result.error && isMissingColumnError(result.error.message)) {
+    result = await runHistorySelect(selectWithoutMonth);
+  }
+
+  if (result.error || !result.data) return [];
+  const data = result.data as unknown as Array<Record<string, unknown>>;
 
   const flatFilter = filters.flat?.trim().toLowerCase() || null;
   const tenantFilter = filters.tenant?.trim().toLowerCase() || null;
   const monthFilter = filters.month?.trim() || null;
   const statusFilter = filters.status?.trim().toLowerCase() || null;
 
-  return (data as unknown as Array<Record<string, unknown>>)
-    .map((payment) => {
+  return data.map((payment) => {
       const tenancy = unwrapOne(
         payment.tenancies as
           | {
@@ -296,20 +304,27 @@ export async function listPaymentHistory(
       );
 
       const notes = (payment.notes as string | null) ?? null;
-      const { billingMonthKey, userNotes } = parseBillingMonthFromNotes(notes);
+      const { userNotes } = parseBillingMonthFromNotes(notes);
       const monthKey =
-        billingMonthKey ??
-        String(payment.payment_date ?? "").slice(0, 7) ??
-        "";
+        paymentDisplayMonth({
+          billingMonth:
+            typeof payment.billing_month === "string"
+              ? payment.billing_month
+              : null,
+          notes,
+          paymentDate: String(payment.payment_date ?? ""),
+        }) ?? "";
 
       const amountDue =
         payment.amount_due == null ? null : num(payment.amount_due);
       const amountPaid = num(payment.amount_paid);
-      let status: PaymentStatus =
-        (payment.status as string)?.toLowerCase() === "waived"
+      const rawStatus = String(payment.status ?? "").toLowerCase();
+      let status: PaymentStatus = isVoidedPaymentStatus(rawStatus)
+        ? "voided"
+        : rawStatus === "waived"
           ? "waived"
           : computePaymentStatus(amountDue ?? amountPaid, amountPaid);
-      if (monthKey) {
+      if (monthKey && status !== "voided") {
         status = applyOverdueIfNeeded(status, monthKey, nowKey);
       }
 
@@ -325,6 +340,7 @@ export async function listPaymentHistory(
         status,
         paymentDate: String(payment.payment_date ?? ""),
         paymentMode: (payment.payment_mode as string | null) ?? null,
+        paymentType: (payment.payment_type as string | null) ?? null,
         transactionReference:
           (payment.transaction_reference as string | null) ?? null,
         receiptId: receipt?.id ?? null,

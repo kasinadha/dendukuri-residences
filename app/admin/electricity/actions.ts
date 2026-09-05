@@ -5,10 +5,17 @@ import { requireAdmin } from "@/lib/auth";
 import {
   createElectricityBillingRun,
   createElectricityReading,
+  getLastBuildingMeterReading,
+  getLastReadingsByFlatId,
   listFlatsForElectricityBilling,
   listFlatsForSelect,
-  getLastReadingsByFlatId,
 } from "@/lib/electricity";
+import {
+  isValidBillingMonth,
+  parseMeterReading,
+  parseRupeeAmount,
+} from "@/lib/money";
+import { formatActionError } from "@/lib/format-action-error";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -24,29 +31,51 @@ function asOptionalNumber(formData: FormData, key: string): number | null {
 
 export async function recordElectricityReading(formData: FormData) {
   const { supabase } = await requireAdmin();
+  try {
+    const previousReading = parseMeterReading(
+      asString(formData, "previous_reading")
+    );
+    const currentReading = parseMeterReading(
+      asString(formData, "current_reading")
+    );
+    if (previousReading == null || currentReading == null) {
+      return {
+        ok: false as const,
+        error: "Enter valid meter readings (0 or more).",
+      };
+    }
+    const billRaw = asString(formData, "bill_amount");
+    const billAmount = billRaw
+      ? parseRupeeAmount(billRaw, { allowZero: true })
+      : null;
+    if (billRaw && billAmount == null) {
+      return { ok: false as const, error: "Bill amount cannot be negative." };
+    }
 
-  const result = await createElectricityReading(supabase, {
-    flatId: asString(formData, "flat_id"),
-    readingDate: asString(formData, "reading_date"),
-    previousReading: Number(asString(formData, "previous_reading")),
-    currentReading: Number(asString(formData, "current_reading")),
-    billAmount: asString(formData, "bill_amount")
-      ? Number(asString(formData, "bill_amount"))
-      : null,
-    status: asString(formData, "status") || "recorded",
-    notes: asString(formData, "notes") || null,
-  });
+    const result = await createElectricityReading(supabase, {
+      flatId: asString(formData, "flat_id"),
+      readingDate: asString(formData, "reading_date"),
+      previousReading,
+      currentReading,
+      billAmount,
+      status: asString(formData, "status") || "recorded",
+      notes: asString(formData, "notes") || null,
+    });
 
-  if (result.ok) {
-    revalidatePath("/admin/electricity");
-    revalidatePath("/tenant");
+    if (result.ok) {
+      revalidatePath("/admin/electricity");
+      revalidatePath("/tenant");
+    }
+
+    return result;
+  } catch (error) {
+    return { ok: false as const, error: formatActionError(error, "Could not save reading.") };
   }
-
-  return result;
 }
 
 export async function generateElectricityBillingAction(formData: FormData) {
   const { supabase } = await requireAdmin();
+  try {
   const flatCount = Number(asString(formData, "flat_count"));
   if (!Number.isFinite(flatCount) || flatCount < 1) {
     return { ok: false as const, error: "No flat readings provided." };
@@ -58,8 +87,12 @@ export async function generateElectricityBillingAction(formData: FormData) {
     if (!flatId) continue;
     flats.push({
       flatId,
-      previousReading: Number(asString(formData, `previous_reading_${index}`)),
-      currentReading: Number(asString(formData, `current_reading_${index}`)),
+      previousReading:
+        parseMeterReading(asString(formData, `previous_reading_${index}`)) ??
+        Number.NaN,
+      currentReading:
+        parseMeterReading(asString(formData, `current_reading_${index}`)) ??
+        Number.NaN,
       sanctionedKw:
         asOptionalNumber(formData, `sanctioned_kw_${index}`) ?? undefined,
       status: "pending",
@@ -68,6 +101,9 @@ export async function generateElectricityBillingAction(formData: FormData) {
 
   const billingMonth = asString(formData, "billing_month");
   const billingMonthKey = billingMonth.replace("/", "-");
+  if (!isValidBillingMonth(billingMonthKey)) {
+    return { ok: false as const, error: "Billing month is invalid." };
+  }
   const buildingWingRaw = asString(formData, "building_wing").toUpperCase();
   if (buildingWingRaw !== "C" && buildingWingRaw !== "D") {
     return { ok: false as const, error: "Select Building C or Building D." };
@@ -111,6 +147,12 @@ export async function generateElectricityBillingAction(formData: FormData) {
     flatCount: flats.length,
     totalBilled,
   };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not save electricity bills."),
+    };
+  }
 }
 
 export async function fetchFlatsForElectricityBillingAction(
@@ -122,11 +164,14 @@ export async function fetchFlatsForElectricityBillingAction(
     return { ok: false as const, error: "Invalid billing month." };
   }
 
-  const [flats, allFlats, lastReadingsByFlatId] = await Promise.all([
-    listFlatsForElectricityBilling(supabase, billingMonthKey),
-    listFlatsForSelect(supabase),
-    getLastReadingsByFlatId(supabase),
-  ]);
+  const [flats, allFlats, lastReadingsByFlatId, lastBuildingC, lastBuildingD] =
+    await Promise.all([
+      listFlatsForElectricityBilling(supabase, billingMonthKey),
+      listFlatsForSelect(supabase),
+      getLastReadingsByFlatId(supabase),
+      getLastBuildingMeterReading(supabase, "C"),
+      getLastBuildingMeterReading(supabase, "D"),
+    ]);
 
   return {
     ok: true as const,
@@ -134,5 +179,6 @@ export async function fetchFlatsForElectricityBillingAction(
     allFlats,
     billingMonthKey,
     lastReadingsByFlatId,
+    lastBuildingReadings: { C: lastBuildingC, D: lastBuildingD },
   };
 }

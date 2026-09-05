@@ -27,7 +27,8 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
 
     startTransition(async () => {
       const result = isEdit
@@ -40,7 +41,7 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
       }
 
       setSuccess(isEdit ? "Flat updated." : "Flat saved to Supabase.");
-      if (!isEdit) event.currentTarget.reset();
+      if (!isEdit) form.reset();
       onCancelEdit?.();
       router.refresh();
     });
@@ -196,7 +197,7 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
           />
           <span className="mt-1 block text-xs text-slate-500">
             Shown on the tenant pay page for this flat. Leave blank to use the
-            global env UPI.
+            Joint account UPI from Admin → Accounts, then the global env UPI.
           </span>
         </label>
 

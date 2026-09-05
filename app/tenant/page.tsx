@@ -6,6 +6,8 @@ import {
   DoorOpen,
   ChevronRight,
   IndianRupee,
+  ScrollText,
+  Cctv,
 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
@@ -13,14 +15,16 @@ import { listMaintenanceRequests } from "@/lib/maintenance";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr, listReceiptViews } from "@/lib/receipts";
 import { getTenantMonthDue } from "@/lib/reminders";
+import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 export default async function TenantHomePage() {
   const { supabase, user, profile } = await requireTenant();
   const ctx = await getTenantPortalContext(supabase, user.id);
-  const receipts = (await listReceiptViews(supabase, { limit: 20 })).filter(
-    (row) => row.tenantProfileId === user.id
-  );
+  const duesClient = getTenantDuesSupabaseClient(supabase);
+  const receipts = (
+    await listReceiptViews(duesClient, { limit: 20, tenantProfileId: user.id })
+  ).filter((row) => row.tenantProfileId === user.id);
   const electricity = ctx?.flatId
     ? await listElectricityReadings(supabase, { flatId: ctx.flatId, limit: 3 })
     : [];
@@ -28,7 +32,7 @@ export default async function TenantHomePage() {
     ? await listMaintenanceRequests(supabase, { flatId: ctx.flatId, limit: 3 })
     : [];
   const monthDue = ctx?.tenancyId
-    ? await getTenantMonthDue(supabase, ctx.tenancyId)
+    ? await getTenantMonthDue(duesClient, ctx.tenancyId)
     : null;
 
   const latestReceipt = receipts[0] ?? null;
@@ -70,6 +74,9 @@ export default async function TenantHomePage() {
                   {formatInr(monthDue.rentDue)}
                   {monthDue.chargesDue > 0
                     ? ` + charges ${formatInr(monthDue.chargesDue)}`
+                    : ""}
+                  {monthDue.finesCharge > 0
+                    ? ` + fines ${formatInr(monthDue.finesCharge)}`
                     : ""}
                   ) · Paid {formatInr(monthDue.amountPaid)}
                 </p>
@@ -134,14 +141,20 @@ export default async function TenantHomePage() {
           {
             href: "/tenant/pay",
             icon: IndianRupee,
-            title: "Pay rent",
-            detail: "UPI / QR + submit UTR for confirmation",
+            title: "Pay dues",
+            detail: "Rent, charges, electricity + submit UTR",
           },
           {
             href: "/tenant/receipts",
             icon: Receipt,
             title: "Rent receipts",
-            detail: "View and print payment receipts",
+            detail: "View, print, and download PDFs",
+          },
+          {
+            href: "/tenant/cameras",
+            icon: Cctv,
+            title: "Cameras",
+            detail: "Common-area live view",
           },
           {
             href: "/tenant/electricity",
@@ -154,6 +167,12 @@ export default async function TenantHomePage() {
             icon: Wrench,
             title: "Maintenance",
             detail: "Raise or track repair requests",
+          },
+          {
+            href: "/tenant/agreement",
+            icon: ScrollText,
+            title: "Rental agreement",
+            detail: "Read and accept house terms",
           },
           {
             href: "/tenant/vacate",

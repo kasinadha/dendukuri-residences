@@ -6,10 +6,13 @@ import {
   Users,
   IndianRupee,
   CircleAlert,
+  Percent,
+  Clock,
   Zap,
   Droplets,
   Wrench,
   ArrowRight,
+  Cctv,
 } from "lucide-react";
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
@@ -74,6 +77,27 @@ export default async function AdminDashboard() {
       detail: `Outstanding ${formatInr(rentMonth.outstanding)}`,
       icon: CircleAlert,
     },
+    {
+      title: "Collection rate",
+      value:
+        rentMonth.collectionRatePercent != null
+          ? `${rentMonth.collectionRatePercent}%`
+          : "—",
+      detail: `${rentMonth.paidTenants} paid · ${rentMonth.pendingTenants} unpaid`,
+      icon: Percent,
+    },
+    {
+      title: "Delayed",
+      value:
+        rentMonth.delayedDaysMax > 0
+          ? `${rentMonth.delayedDaysMax} days`
+          : "On time",
+      detail:
+        rentMonth.overdueTenants > 0
+          ? `${rentMonth.overdueTenants} overdue after the 5th`
+          : "No overdue tenants this month",
+      icon: Clock,
+    },
   ];
 
   return (
@@ -97,7 +121,7 @@ export default async function AdminDashboard() {
         </Link>
       </div>
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {stats.map(({ title, value, detail, icon: Icon }) => (
           <div
             key={title}
@@ -117,7 +141,7 @@ export default async function AdminDashboard() {
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+      <div className="mt-8">
         <UnpaidRentRemindersPanel
           billingMonthKey={unpaidReminders.billingMonthKey}
           billingMonthLabel={unpaidReminders.billingMonthLabel}
@@ -125,6 +149,9 @@ export default async function AdminDashboard() {
           whatsappBusinessPhone={whatsapp.businessPhoneDisplay}
           whatsappApiEnabled={whatsapp.apiEnabled}
         />
+      </div>
+
+      <div className="mt-6">
         <OwnerDuesRemindersPanel items={ownerDues} />
       </div>
 
@@ -235,6 +262,11 @@ export default async function AdminDashboard() {
                 href: "/admin/tenants",
                 icon: Users,
                 label: "Review Tenants",
+              },
+              {
+                href: "/admin/cameras",
+                icon: Cctv,
+                label: "View cameras",
               },
               {
                 href: "/admin/maintenance",

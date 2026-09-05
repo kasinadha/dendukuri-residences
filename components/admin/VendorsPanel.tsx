@@ -23,7 +23,8 @@ export default function VendorsPanel({ vendors }: { vendors: VendorRow[] }) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     startTransition(async () => {
       const result = await createVendorAction(formData);
       if (!result.ok) {
@@ -31,7 +32,7 @@ export default function VendorsPanel({ vendors }: { vendors: VendorRow[] }) {
         return;
       }
       setSuccess("Vendor added.");
-      event.currentTarget.reset();
+      form.reset();
       router.refresh();
     });
   }

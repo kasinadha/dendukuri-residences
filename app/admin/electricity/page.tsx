@@ -1,6 +1,7 @@
 import AdminLayout from "@/components/admin/AdminLayout";
 import ElectricityBillingPanel from "@/components/admin/ElectricityBillingPanel";
 import ElectricityForm from "@/components/admin/ElectricityForm";
+import ElectricityPaymentBadge from "@/components/electricity/ElectricityPaymentBadge";
 import { requireAdmin } from "@/lib/auth";
 import {
   getLastBuildingMeterReading,
@@ -9,12 +10,17 @@ import {
   listFlatsForSelect,
   listOccupiedFlatsForBilling,
 } from "@/lib/electricity";
+import {
+  buildTenancyByFlatNumberMap,
+  getElectricityPaymentStatusByFlat,
+  readingBillingMonthKey,
+} from "@/lib/electricity-dues";
 import { buildingWingLabel } from "@/lib/building-wing";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 
 export default async function ElectricityPage() {
   const { supabase } = await requireAdmin();
-  const [flats, occupiedFlats, readings, billingRuns, lastBuildingC, lastBuildingD] =
+  const [flats, occupiedFlats, readings, billingRuns, lastBuildingC, lastBuildingD, tenancyByFlat] =
     await Promise.all([
       listFlatsForSelect(supabase),
       listOccupiedFlatsForBilling(supabase),
@@ -22,7 +28,23 @@ export default async function ElectricityPage() {
       listElectricityBillingRuns(supabase),
       getLastBuildingMeterReading(supabase, "C"),
       getLastBuildingMeterReading(supabase, "D"),
+      buildTenancyByFlatNumberMap(supabase),
     ]);
+
+  const readingsWithStatus = await Promise.all(
+    readings.map(async (row) => {
+      const billingMonthKey = readingBillingMonthKey(row);
+      const paymentStatus =
+        billingMonthKey && row.flatNumber !== "—"
+          ? await getElectricityPaymentStatusByFlat(supabase, {
+              flatNumber: row.flatNumber,
+              billingMonthKey,
+              tenancyByFlat,
+            })
+          : null;
+      return { row, paymentStatus };
+    })
+  );
 
   return (
     <AdminLayout>
@@ -33,11 +55,12 @@ export default async function ElectricityPage() {
         </h2>
         <p className="mt-2 max-w-3xl text-slate-500">
           Enter the <strong>Building C</strong> or <strong>Building D</strong> main
-          meter readings separately, plus each flat&apos;s cumulative meter. Flats
-          are picked for the billing month you select (including mid-month move-ins
-          and vacated units). Common area for that wing = building usage − sum of
-          flat usage in the same wing, shared only among included flats in that
-          wing.
+          meter readings separately, plus each flat&apos;s cumulative meter. Pick
+          the <strong>usage month</strong> (usually last month — August meters
+          entered in September). Flats are chosen for that month (including
+          mid-month move-ins and vacated units). Common area for that wing =
+          building usage − sum of flat usage in the same wing, shared only among
+          included flats in that wing.
         </p>
       </div>
 
@@ -90,9 +113,9 @@ export default async function ElectricityPage() {
             <p className="p-6 text-sm text-slate-500">No readings yet.</p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {readings.map((row) => (
+              {readingsWithStatus.map(({ row, paymentStatus }) => (
                 <li key={row.id} className="px-5 py-4 sm:px-6">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="font-semibold text-slate-900">
                         Flat {row.flatNumber}
@@ -107,13 +130,17 @@ export default async function ElectricityPage() {
                         · {row.previousReading} → {row.currentReading}
                       </p>
                     </div>
-                    <div className="text-left sm:text-right">
+                    <div className="flex flex-col gap-2 sm:items-end">
                       <p className="font-semibold text-slate-900">
                         {row.billAmount != null ? formatInr(row.billAmount) : "—"}
                       </p>
-                      <p className="text-xs capitalize text-slate-500">
-                        {row.status}
-                      </p>
+                      {paymentStatus ? (
+                        <ElectricityPaymentBadge status={paymentStatus} />
+                      ) : (
+                        <p className="text-xs capitalize text-slate-500">
+                          {row.status}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </li>
