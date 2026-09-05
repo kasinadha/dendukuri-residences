@@ -10,12 +10,8 @@ export function downloadPdfBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-export async function fetchReceiptPdfBlob(
-  receiptId: string,
-  kind: "full" | "hra" = "full"
-): Promise<Blob> {
-  const suffix = kind === "hra" ? "?kind=hra" : "";
-  const response = await fetch(`/api/receipts/${receiptId}/pdf${suffix}`, {
+export async function fetchReceiptPdfBlob(receiptId: string): Promise<Blob> {
+  const response = await fetch(`/api/receipts/${receiptId}/pdf`, {
     credentials: "include",
   });
   if (!response.ok) {

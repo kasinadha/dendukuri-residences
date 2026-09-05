@@ -25,10 +25,7 @@ export async function listMaintenanceRequests(
   supabase: SupabaseClient,
   options?: { flatId?: string; limit?: number }
 ): Promise<MaintenanceRequest[]> {
-  let query = supabase
-    .from("maintenance_requests")
-    .select(
-      `
+  const columns = `
       id,
       flat_id,
       title,
@@ -39,38 +36,65 @@ export async function listMaintenanceRequests(
       category,
       payer_account_id,
       created_at,
-      flats ( flat_number ),
+      flats ( flat_number )
+  `;
+  const withPayer = `${columns},
       payment_accounts ( label )
-    `
-    )
-    .order("created_at", { ascending: false })
-    .limit(options?.limit ?? 50);
+  `;
 
-  if (options?.flatId) {
-    query = query.eq("flat_id", options.flatId);
+  async function run(select: string) {
+    let query = supabase
+      .from("maintenance_requests")
+      .select(select)
+      .order("created_at", { ascending: false })
+      .limit(options?.limit ?? 50);
+
+    if (options?.flatId) {
+      query = query.eq("flat_id", options.flatId);
+    }
+    return query;
   }
 
-  const { data, error } = await query;
+  let { data, error } = await run(withPayer);
+  if (error) {
+    const retry = await run(columns);
+    data = retry.data;
+    error = retry.error;
+  }
   if (error || !data) return [];
 
   return data.map((row) => {
-    const flat = Array.isArray(row.flats) ? row.flats[0] : row.flats;
-    const payerAccount = Array.isArray(row.payment_accounts)
-      ? row.payment_accounts[0]
-      : row.payment_accounts;
+    const rec = row as unknown as {
+      id: string;
+      flat_id: string;
+      title: string | null;
+      description: string | null;
+      status: string | null;
+      priority: string | null;
+      cost: unknown;
+      category: string | null;
+      payer_account_id: string | null;
+      created_at: string;
+      flats?: { flat_number?: string } | { flat_number?: string }[] | null;
+      payment_accounts?: { label?: string } | { label?: string }[] | null;
+    };
+    const flat = Array.isArray(rec.flats) ? rec.flats[0] : rec.flats;
+    const payerAccount = Array.isArray(rec.payment_accounts)
+      ? rec.payment_accounts[0]
+      : rec.payment_accounts;
     return {
-      id: row.id,
-      flatId: row.flat_id,
+      id: rec.id,
+      flatId: rec.flat_id,
       flatNumber: flat?.flat_number?.trim() || "—",
-      title: row.title?.trim() || "—",
-      description: row.description,
-      status: row.status?.trim() || "open",
-      priority: row.priority?.trim() || "normal",
-      cost: num(row.cost),
-      category: row.category,
-      payerAccountId: row.payer_account_id,
+      title: rec.title?.trim() || "—",
+      description: rec.description,
+      status: rec.status?.trim() || "open",
+      priority: rec.priority?.trim() || "normal",
+      cost: num(rec.cost),
+      category: rec.category,
+      payerAccountId: rec.payer_account_id,
       payerAccountLabel: payerAccount?.label?.trim() || null,
-      createdAt: row.created_at,
+      createdAt: rec.created_at,
     };
   });
 }
@@ -97,20 +121,24 @@ export async function createMaintenanceRequest(
     return { ok: false, error: "Select who paid for this expense." };
   }
 
+  const payload: Record<string, unknown> = {
+    flat_id: input.flatId,
+    title: input.title.trim(),
+    description: input.description?.trim() || null,
+    status: input.status?.trim() || "open",
+    priority: input.priority?.trim() || "normal",
+    cost: input.cost ?? null,
+    category: input.category?.trim() || null,
+  };
+  if (input.payerAccountId !== undefined) {
+    payload.payer_account_id = input.payerAccountId?.trim() || null;
+  }
+
   const { data, error } = await supabase
     .from("maintenance_requests")
-    .insert({
-      flat_id: input.flatId,
-      title: input.title.trim(),
-      description: input.description?.trim() || null,
-      status: input.status?.trim() || "open",
-      priority: input.priority?.trim() || "normal",
-      cost: input.cost ?? null,
-      category: input.category?.trim() || null,
-      payer_account_id: input.payerAccountId?.trim() || null,
-    })
+    .insert(payload)
     .select("id")
-    .single();
+    .maybeSingle();
 
   if (error || !data) {
     return { ok: false, error: error?.message ?? "Could not create request." };

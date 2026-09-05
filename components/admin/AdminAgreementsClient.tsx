@@ -165,6 +165,7 @@ export default function AdminAgreementsClient({
             Approve each flat before the tenant can see and accept it.
             {pendingApproval.length ? ` ${pendingApproval.length} need approval.` : ""}
             {waitingTenant.length ? ` ${waitingTenant.length} waiting on tenants.` : ""}
+            {" "}Approved terms that tenants have not accepted are reminded daily at 9:00 AM IST when Cloud API is configured.
           </p>
         </div>
         {agreements.length === 0 ? (

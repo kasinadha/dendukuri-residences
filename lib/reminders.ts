@@ -16,6 +16,8 @@ import {
 import {
   formatWhatsAppBusinessPhoneDisplay,
   getWhatsAppBusinessConfig,
+  getWhatsAppTemplateLanguage,
+  getWhatsAppTemplateName,
   sendWhatsAppBusinessMessage,
   toTenantWhatsAppUrl,
 } from "@/lib/whatsapp";
@@ -172,7 +174,8 @@ export async function sendUnpaidRentWhatsAppReminder(
   input: {
     tenancyId: string;
     billingMonth: string;
-    remindedBy: string;
+    remindedBy?: string | null;
+    channel?: string | null;
   }
 ): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
   const tenancyId = input.tenancyId.trim();
@@ -186,21 +189,45 @@ export async function sendUnpaidRentWhatsAppReminder(
   if (!row) {
     return { ok: false, error: "Tenancy not found for this month." };
   }
+  return sendUnpaidRentWhatsAppReminderForRow(supabase, row, {
+    remindedBy: input.remindedBy,
+    channel: input.channel,
+  });
+}
+
+export async function sendUnpaidRentWhatsAppReminderForRow(
+  supabase: SupabaseClient,
+  row: UnpaidReminderRow,
+  input?: { remindedBy?: string | null; channel?: string | null }
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
   if (!row.phone) {
     return { ok: false, error: "Tenant has no mobile number on file." };
   }
 
+  const templateName = getWhatsAppTemplateName("dues");
   const sendResult = await sendWhatsAppBusinessMessage({
     toPhone: row.phone,
     body: buildRentReminderMessage(row),
+    template: templateName
+      ? {
+          name: templateName,
+          language: getWhatsAppTemplateLanguage(),
+          bodyParams: [
+            row.flatNumber,
+            formatBillingMonthLabel(row.billingMonthKey),
+            formatInr(row.totalDue),
+            formatInr(row.outstanding),
+          ],
+        }
+      : null,
   });
   if (!sendResult.ok) return sendResult;
 
   const markResult = await markRentReminded(supabase, {
-    tenancyId,
-    billingMonth,
-    remindedBy: input.remindedBy,
-    channel: "whatsapp_api",
+    tenancyId: row.tenancyId,
+    billingMonth: row.billingMonthKey,
+    remindedBy: input?.remindedBy,
+    channel: input?.channel?.trim() || "whatsapp_api",
     notes: `wa_message_id:${sendResult.messageId}`,
   });
   if (!markResult.ok) return markResult;
@@ -208,16 +235,31 @@ export async function sendUnpaidRentWhatsAppReminder(
   return { ok: true, messageId: sendResult.messageId };
 }
 
+export function remindedWithinHours(
+  iso: string | null | undefined,
+  hours: number
+): boolean {
+  if (!iso || hours <= 0) return false;
+  const at = new Date(iso).getTime();
+  if (!Number.isFinite(at)) return false;
+  return Date.now() - at < hours * 60 * 60 * 1000;
+}
+
 export async function sendAllUnpaidWhatsAppReminders(
   supabase: SupabaseClient,
-  input: { billingMonth: string; remindedBy: string }
+  input?: {
+    billingMonth?: string;
+    remindedBy?: string | null;
+    channel?: string | null;
+    skipRemindedWithinHours?: number;
+  }
 ): Promise<{
   ok: true;
   sent: number;
   skipped: number;
   failed: Array<{ tenancyId: string; tenantName: string; error: string }>;
 }> {
-  const listed = await listUnpaidRentReminders(supabase, input.billingMonth);
+  const listed = await listUnpaidRentReminders(supabase, input?.billingMonth);
   let sent = 0;
   let skipped = 0;
   const failed: Array<{
@@ -225,16 +267,20 @@ export async function sendAllUnpaidWhatsAppReminders(
     tenantName: string;
     error: string;
   }> = [];
+  const skipHours = input?.skipRemindedWithinHours ?? 0;
 
   for (const row of listed.rows) {
     if (!row.phone) {
       skipped += 1;
       continue;
     }
-    const result = await sendUnpaidRentWhatsAppReminder(supabase, {
-      tenancyId: row.tenancyId,
-      billingMonth: listed.billingMonthKey,
-      remindedBy: input.remindedBy,
+    if (remindedWithinHours(row.remindedAt, skipHours)) {
+      skipped += 1;
+      continue;
+    }
+    const result = await sendUnpaidRentWhatsAppReminderForRow(supabase, row, {
+      remindedBy: input?.remindedBy,
+      channel: input?.channel,
     });
     if (result.ok) {
       sent += 1;

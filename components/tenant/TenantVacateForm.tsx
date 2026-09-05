@@ -17,7 +17,8 @@ export default function TenantVacateForm() {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     formData.set("request_type", kind);
     startTransition(async () => {
       const result = await tenantCreateVacate(formData);
@@ -30,7 +31,7 @@ export default function TenantVacateForm() {
           ? "Transfer request submitted. The owner will assign a vacant flat."
           : "Vacate request submitted."
       );
-      event.currentTarget.reset();
+      form.reset();
       setKind("vacate");
       router.refresh();
     });
