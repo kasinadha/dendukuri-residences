@@ -109,6 +109,19 @@ export async function updateTenantProfile(
     return { ok: false, error: tenantError.message };
   }
 
+  const { data: tenantRow } = await supabase
+    .from("tenants")
+    .select("profile_id")
+    .eq("id", input.tenantId)
+    .maybeSingle();
+
+  if (tenantRow?.profile_id) {
+    await supabase
+      .from("profiles")
+      .update({ full_name: input.fullName.trim() })
+      .eq("id", tenantRow.profile_id);
+  }
+
   return { ok: true };
 }
 
@@ -205,6 +218,9 @@ export async function updateTenantTenancyTerms(
     }
     return { ok: false, error: tenancyError.message };
   }
+
+  const { generateDraftAgreementForTenancy } = await import("@/lib/agreements");
+  await generateDraftAgreementForTenancy(supabase, input.tenancyId);
 
   return { ok: true };
 }

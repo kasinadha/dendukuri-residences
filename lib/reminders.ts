@@ -16,6 +16,7 @@ import {
 import {
   formatWhatsAppBusinessPhoneDisplay,
   getWhatsAppBusinessConfig,
+  sendWhatsAppBusinessMessage,
   toTenantWhatsAppUrl,
 } from "@/lib/whatsapp";
 
@@ -164,6 +165,89 @@ export async function markRentReminded(
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
+}
+
+export async function sendUnpaidRentWhatsAppReminder(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    billingMonth: string;
+    remindedBy: string;
+  }
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  const tenancyId = input.tenancyId.trim();
+  const billingMonth = input.billingMonth.trim();
+  if (!tenancyId || !/^\d{4}-\d{2}$/.test(billingMonth)) {
+    return { ok: false, error: "Missing tenancy or billing month." };
+  }
+
+  const listed = await listUnpaidRentReminders(supabase, billingMonth);
+  const row = listed.rows.find((item) => item.tenancyId === tenancyId);
+  if (!row) {
+    return { ok: false, error: "Tenancy not found for this month." };
+  }
+  if (!row.phone) {
+    return { ok: false, error: "Tenant has no mobile number on file." };
+  }
+
+  const sendResult = await sendWhatsAppBusinessMessage({
+    toPhone: row.phone,
+    body: buildRentReminderMessage(row),
+  });
+  if (!sendResult.ok) return sendResult;
+
+  const markResult = await markRentReminded(supabase, {
+    tenancyId,
+    billingMonth,
+    remindedBy: input.remindedBy,
+    channel: "whatsapp_api",
+    notes: `wa_message_id:${sendResult.messageId}`,
+  });
+  if (!markResult.ok) return markResult;
+
+  return { ok: true, messageId: sendResult.messageId };
+}
+
+export async function sendAllUnpaidWhatsAppReminders(
+  supabase: SupabaseClient,
+  input: { billingMonth: string; remindedBy: string }
+): Promise<{
+  ok: true;
+  sent: number;
+  skipped: number;
+  failed: Array<{ tenancyId: string; tenantName: string; error: string }>;
+}> {
+  const listed = await listUnpaidRentReminders(supabase, input.billingMonth);
+  let sent = 0;
+  let skipped = 0;
+  const failed: Array<{
+    tenancyId: string;
+    tenantName: string;
+    error: string;
+  }> = [];
+
+  for (const row of listed.rows) {
+    if (!row.phone) {
+      skipped += 1;
+      continue;
+    }
+    const result = await sendUnpaidRentWhatsAppReminder(supabase, {
+      tenancyId: row.tenancyId,
+      billingMonth: listed.billingMonthKey,
+      remindedBy: input.remindedBy,
+    });
+    if (result.ok) {
+      sent += 1;
+    } else {
+      failed.push({
+        tenancyId: row.tenancyId,
+        tenantName: row.tenantName,
+        error: result.error,
+      });
+    }
+  }
+
+  return { ok: true, sent, skipped, failed };
 }
 
 /** Owner-side dues: unpaid water tankers + open maintenance with cost. */

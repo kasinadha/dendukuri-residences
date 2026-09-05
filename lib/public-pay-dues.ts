@@ -84,6 +84,15 @@ function buildLinesFromMonthDue(monthDue: MonthlyDuesLedgerRow): DuesBreakdownLi
       outstanding: monthDue.otherMonthlyCharge,
     });
   }
+  if (monthDue.finesCharge > 0) {
+    lines.push({
+      key: "fines",
+      label: "Fines",
+      due: monthDue.finesCharge,
+      paid: 0,
+      outstanding: monthDue.finesCharge,
+    });
+  }
   if (monthDue.electricityCharge > 0) {
     lines.push({
       key: "electricity",

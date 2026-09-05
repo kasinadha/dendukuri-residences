@@ -1,7 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import LogoutButton from "@/components/admin/LogoutButton";
+import { getPendingApprovedAgreementForTenancy } from "@/lib/agreements";
 import { requireTenant } from "@/lib/auth";
+import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 const nav = [
   { href: "/tenant", label: "Home" },
@@ -9,6 +11,7 @@ const nav = [
   { href: "/tenant/receipts", label: "Receipts" },
   { href: "/tenant/electricity", label: "Electricity" },
   { href: "/tenant/maintenance", label: "Maintenance" },
+  { href: "/tenant/agreement", label: "Agreement" },
   { href: "/tenant/vacate", label: "Move / transfer" },
   { href: "/help", label: "Help" },
 ] as const;
@@ -18,7 +21,11 @@ export default async function TenantLayout({
 }: {
   children: ReactNode;
 }) {
-  const { profile } = await requireTenant();
+  const { supabase, user, profile } = await requireTenant();
+  const ctx = await getTenantPortalContext(supabase, user.id);
+  const pendingAgreement = ctx?.tenancyId
+    ? await getPendingApprovedAgreementForTenancy(supabase, ctx.tenancyId)
+    : null;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -33,7 +40,7 @@ export default async function TenantLayout({
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-800">
-                {profile.full_name ?? "Tenant"}
+                {profile.full_name ?? ctx?.fullName ?? "Tenant"}
               </p>
               <p className="text-xs text-slate-500">Tenant</p>
             </div>
@@ -52,6 +59,22 @@ export default async function TenantLayout({
           ))}
         </nav>
       </header>
+      {pendingAgreement ? (
+        <div className="border-b border-amber-200 bg-amber-50">
+          <div className="mx-auto flex max-w-5xl flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-amber-950">
+              Please read and accept the rental terms for Flat{" "}
+              {pendingAgreement.flatNumber}.
+            </p>
+            <Link
+              href="/tenant/agreement"
+              className="rounded-xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Review terms
+            </Link>
+          </div>
+        </div>
+      ) : null}
       <main className="mx-auto max-w-5xl px-5 py-8">{children}</main>
     </div>
   );

@@ -3,24 +3,28 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Building2,
-  Users,
   IndianRupee,
-  Zap,
+  Landmark,
+  LayoutDashboard,
+  MessageSquare,
+  Receipt,
+  ScrollText,
+  Users,
   Wrench,
+  Zap,
   Droplets,
   ContactRound,
   CircleHelp,
   BarChart3,
-  Landmark,
-  Receipt,
+  Building2,
 } from "lucide-react";
 
 export const adminNavItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Flats", href: "/admin/flats", icon: Building2 },
   { label: "Tenants", href: "/admin/tenants", icon: Users },
+  { label: "Agreements", href: "/admin/agreements", icon: ScrollText },
+  { label: "Enquiries", href: "/admin/enquiries", icon: MessageSquare },
   { label: "Rent & Payments", href: "/admin/payments", icon: IndianRupee },
   { label: "Accounts", href: "/admin/accounts", icon: Landmark },
   { label: "Electricity", href: "/admin/electricity", icon: Zap },

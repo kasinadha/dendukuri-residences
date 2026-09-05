@@ -26,6 +26,7 @@ export const DUES_LINE_ALLOCATION_ORDER = [
   "parking",
   "washer",
   "other",
+  "fines",
   "electricity",
 ] as const;
 
@@ -246,6 +247,7 @@ const LINE_LABELS: Record<string, string> = {
   parking: "Car parking",
   washer: "Washing machine",
   other: "Other monthly",
+  fines: "Fines",
   electricity: "Electricity",
 };
 

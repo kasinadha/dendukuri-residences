@@ -1,8 +1,10 @@
 import Link from "next/link";
+import DownloadHraButton from "@/components/receipts/DownloadHraButton";
 import { requireTenant } from "@/lib/auth";
 import {
   formatDisplayDate,
   formatInr,
+  hraRentPaid,
   listReceiptViews,
 } from "@/lib/receipts";
 import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
@@ -23,7 +25,9 @@ export default async function TenantReceiptsPage() {
         Your rent receipts
       </h2>
       <p className="mt-2 text-slate-500">
-        View-only access to receipts for your tenancy.
+        View-only access to receipts for your tenancy. Download an HRA PDF when
+        the payment includes house rent (electricity, washer, and other dues are
+        excluded).
       </p>
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -34,10 +38,13 @@ export default async function TenantReceiptsPage() {
         ) : (
           <ul className="divide-y divide-slate-100">
             {receipts.map((receipt) => (
-              <li key={receipt.receiptId}>
+              <li
+                key={receipt.receiptId}
+                className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
                 <Link
                   href={`/tenant/receipts/${receipt.receiptId}`}
-                  className="flex flex-col gap-1 px-5 py-4 transition hover:bg-emerald-50/60 sm:flex-row sm:items-center sm:justify-between"
+                  className="min-w-0 flex-1 transition hover:text-emerald-800"
                 >
                   <div>
                     <p className="font-semibold text-slate-900">
@@ -47,7 +54,7 @@ export default async function TenantReceiptsPage() {
                       Flat {receipt.flatNumber} · {receipt.billingMonth}
                     </p>
                   </div>
-                  <div className="text-left sm:text-right">
+                  <div className="mt-2 sm:hidden">
                     {receipt.amountDue != null &&
                     receipt.amountPaid < receipt.amountDue ? (
                       <>
@@ -58,28 +65,46 @@ export default async function TenantReceiptsPage() {
                           Due {formatInr(receipt.amountDue)} · Balance{" "}
                           {formatInr(receipt.amountDue - receipt.amountPaid)}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {formatDisplayDate(receipt.paymentDate)} · Partial
-                        </p>
                       </>
                     ) : (
-                      <>
-                        <p className="font-semibold text-slate-900">
-                          {formatInr(receipt.amountPaid)}
-                        </p>
-                        {receipt.amountDue != null &&
-                        receipt.amountDue > receipt.amountPaid ? (
-                          <p className="mt-1 text-xs text-slate-500">
-                            Due {formatInr(receipt.amountDue)}
-                          </p>
-                        ) : null}
-                        <p className="mt-1 text-xs text-slate-500">
-                          Paid {formatDisplayDate(receipt.paymentDate)}
-                        </p>
-                      </>
+                      <p className="font-semibold text-slate-900">
+                        {formatInr(receipt.amountPaid)}
+                      </p>
                     )}
+                    <p className="mt-1 text-xs text-slate-500">
+                      Paid {formatDisplayDate(receipt.paymentDate)}
+                    </p>
                   </div>
                 </Link>
+                <div className="hidden text-right sm:block">
+                  {receipt.amountDue != null &&
+                  receipt.amountPaid < receipt.amountDue ? (
+                    <>
+                      <p className="font-semibold text-slate-900">
+                        Paid {formatInr(receipt.amountPaid)}
+                      </p>
+                      <p className="mt-1 text-xs text-amber-800">
+                        Due {formatInr(receipt.amountDue)} · Balance{" "}
+                        {formatInr(receipt.amountDue - receipt.amountPaid)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatDisplayDate(receipt.paymentDate)} · Partial
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-slate-900">
+                        {formatInr(receipt.amountPaid)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Paid {formatDisplayDate(receipt.paymentDate)}
+                      </p>
+                    </>
+                  )}
+                </div>
+                {hraRentPaid(receipt) > 0 ? (
+                  <DownloadHraButton receipt={receipt} />
+                ) : null}
               </li>
             ))}
           </ul>

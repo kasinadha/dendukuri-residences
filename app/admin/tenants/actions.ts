@@ -8,6 +8,7 @@ import {
   createTenantPortalLogin,
   resetTenantPortalPassword,
 } from "@/lib/tenant-auth";
+import { reviewNameChangeRequest } from "@/lib/tenant-change-requests";
 import {
   archiveTenant,
   mergeStaleTenantIntoCanonical,
@@ -182,6 +183,7 @@ export async function updateTenantTermsAction(formData: FormData) {
     revalidatePath("/admin/payments");
     revalidatePath("/admin/accounts");
     revalidatePath("/admin/flats");
+    revalidatePath("/admin/agreements");
   }
   return result;
 }
@@ -207,4 +209,33 @@ export async function syncMoveInDatesFromCsvAction() {
     revalidateOccupancy();
   }
   return { ok: true as const, summary };
+}
+
+export async function approveNameChangeAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const result = await reviewNameChangeRequest(supabase, {
+    id: asString(formData, "id"),
+    decision: "approved",
+    reviewedBy: user.id,
+  });
+  if (result.ok) {
+    revalidateOccupancy();
+    revalidatePath("/tenant");
+  }
+  return result;
+}
+
+export async function rejectNameChangeAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const result = await reviewNameChangeRequest(supabase, {
+    id: asString(formData, "id"),
+    decision: "rejected",
+    adminNote: asString(formData, "admin_note") || null,
+    reviewedBy: user.id,
+  });
+  if (result.ok) {
+    revalidateOccupancy();
+    revalidatePath("/tenant");
+  }
+  return result;
 }

@@ -17,6 +17,7 @@ import {
   formatBillingMonthLabel,
   parseBillingMonthFromNotes,
 } from "@/lib/receipts";
+import { loadFinesDueByTenancy } from "@/lib/fines";
 import { buildTenantMonthlyCharges } from "@/lib/tenant-charges";
 
 function currentMonthKey(now = new Date()): string {
@@ -60,6 +61,7 @@ export type MonthlyDuesLedgerRow = {
   otherMonthlyCharge: number;
   otherChargesNotes: string | null;
   chargesDue: number;
+  finesCharge: number;
   electricityCharge: number;
   totalDue: number;
   rentPaid: number;
@@ -213,6 +215,7 @@ function buildMonthlyDuesLines(input: {
   washingMachineCharge: number;
   otherMonthlyCharge: number;
   otherChargesNotes: string | null;
+  finesCharge: number;
   electricityCharge: number;
 }): DuesBreakdownLine[] {
   const lines: DuesBreakdownLine[] = [];
@@ -262,6 +265,15 @@ function buildMonthlyDuesLines(input: {
       outstanding: input.otherMonthlyCharge,
     });
   }
+  if (input.finesCharge > 0) {
+    lines.push({
+      key: "fines",
+      label: "Fines",
+      due: input.finesCharge,
+      paid: 0,
+      outstanding: input.finesCharge,
+    });
+  }
   if (input.electricityCharge > 0) {
     lines.push({
       key: "electricity",
@@ -286,9 +298,10 @@ export async function getMonthlyDuesSummary(
   const monthKey = billingMonthKey?.trim() || currentMonthKey();
   const nowKey = currentMonthKey();
 
-  const [tenancyRows, electricityByFlatId] = await Promise.all([
+  const [tenancyRows, electricityByFlatId, finesByTenancy] = await Promise.all([
     loadActiveTenancies(supabase),
     loadElectricityDueByFlatId(supabase, monthKey),
+    loadFinesDueByTenancy(supabase, monthKey),
   ]);
   const billable = tenancyRows.filter((row) =>
     tenancyIncludedInMonthlyLedger(
@@ -412,6 +425,7 @@ export async function getMonthlyDuesSummary(
     const chargesDue = owesDues ? charges.totalMonthlyCharges : 0;
     const electricityRaw = electricityByFlatId.get(flat?.id ?? "") ?? 0;
     const electricityCharge = owesDues ? electricityRaw : 0;
+    const finesCharge = finesByTenancy.get(row.id) ?? 0;
     const lines = buildMonthlyDuesLines({
       rentDue,
       maintenanceCharge,
@@ -419,6 +433,7 @@ export async function getMonthlyDuesSummary(
       washingMachineCharge,
       otherMonthlyCharge,
       otherChargesNotes: charges.otherChargesNotes,
+      finesCharge,
       electricityCharge,
     });
     const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
@@ -448,6 +463,7 @@ export async function getMonthlyDuesSummary(
       otherMonthlyCharge,
       otherChargesNotes: charges.otherChargesNotes,
       chargesDue,
+      finesCharge,
       electricityCharge,
       totalDue,
       rentPaid,
@@ -501,6 +517,9 @@ export function formatMonthlyDuesBreakdown(row: MonthlyDuesLedgerRow): string {
   if (row.otherMonthlyCharge > 0) {
     parts.push(`other ${row.otherMonthlyCharge}`);
   }
+  if (row.finesCharge > 0) {
+    parts.push(`fines ${row.finesCharge}`);
+  }
   if (row.electricityCharge > 0) {
     parts.push(`electricity ${row.electricityCharge}`);
   }
@@ -552,7 +571,10 @@ export async function getTenancyMonthlyDueRow(
   if (!tenancyIncludedInMonthlyLedger(tenancyDates, monthKey)) return null;
 
   const nowKey = currentMonthKey();
-  const electricityByFlatId = await loadElectricityDueByFlatId(supabase, monthKey);
+  const [electricityByFlatId, finesByTenancy] = await Promise.all([
+    loadElectricityDueByFlatId(supabase, monthKey),
+    loadFinesDueByTenancy(supabase, monthKey),
+  ]);
   const flat = unwrapOne(row.flats);
   const tenant = unwrapOne(row.tenants);
 
@@ -640,6 +662,7 @@ export async function getTenancyMonthlyDueRow(
   const chargesDue = owesDues ? charges.totalMonthlyCharges : 0;
   const electricityRaw = electricityByFlatId.get(flat?.id ?? "") ?? 0;
   const electricityCharge = owesDues ? electricityRaw : 0;
+  const finesCharge = finesByTenancy.get(tenancyId) ?? 0;
   const lines = buildMonthlyDuesLines({
     rentDue,
     maintenanceCharge,
@@ -647,6 +670,7 @@ export async function getTenancyMonthlyDueRow(
     washingMachineCharge,
     otherMonthlyCharge,
     otherChargesNotes: charges.otherChargesNotes,
+    finesCharge,
     electricityCharge,
   });
   const totalDue = lines.reduce((sum, line) => sum + line.due, 0);
@@ -673,6 +697,7 @@ export async function getTenancyMonthlyDueRow(
     otherMonthlyCharge,
     otherChargesNotes: charges.otherChargesNotes,
     chargesDue,
+    finesCharge,
     electricityCharge,
     totalDue,
     rentPaid,

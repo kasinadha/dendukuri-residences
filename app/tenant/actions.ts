@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireTenant } from "@/lib/auth";
+import { acceptTenancyAgreement } from "@/lib/agreements";
 import { getFlatPaymentDetails } from "@/lib/flats";
 import { createMaintenanceRequest } from "@/lib/maintenance";
 import { createVacateRequest } from "@/lib/ops";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/public-pay-dues";
 import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 import { resolveRentUpiDisplay } from "@/lib/rent-upi";
+import { submitNameChangeRequest } from "@/lib/tenant-change-requests";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
 function asString(formData: FormData, key: string): string {
@@ -159,6 +161,54 @@ export async function tenantCreateVacate(formData: FormData) {
     revalidatePath("/tenant");
     revalidatePath("/tenant/vacate");
     revalidatePath("/admin/reports");
+  }
+  return result;
+}
+
+export async function tenantSubmitNameChangeAction(formData: FormData) {
+  const { supabase, user } = await requireTenant();
+  const ctx = await getTenantPortalContext(supabase, user.id);
+  if (!ctx?.tenantId) {
+    return { ok: false as const, error: "No tenant record linked to your login." };
+  }
+
+  const result = await submitNameChangeRequest(supabase, {
+    tenantId: ctx.tenantId,
+    currentValue: ctx.fullName,
+    requestedValue: asString(formData, "full_name"),
+    tenantNote: asString(formData, "tenant_note") || null,
+  });
+
+  if (result.ok) {
+    revalidatePath("/tenant");
+    revalidatePath("/admin/tenants");
+  }
+  return result;
+}
+
+export async function tenantAcceptAgreementAction(formData: FormData) {
+  const { supabase, user } = await requireTenant();
+  const ctx = await getTenantPortalContext(supabase, user.id);
+  if (!ctx?.tenancyId) {
+    return { ok: false as const, error: "No active tenancy on your account." };
+  }
+
+  const result = await acceptTenancyAgreement(supabase, {
+    id: asString(formData, "agreement_id"),
+    tenancyId: ctx.tenancyId,
+    checks: {
+      rent: asString(formData, "check_rent") === "on",
+      maintenance: asString(formData, "check_maintenance") === "on",
+      other: asString(formData, "check_other") === "on",
+      deposit: asString(formData, "check_deposit") === "on",
+      terms: asString(formData, "check_terms") === "on",
+    },
+  });
+
+  if (result.ok) {
+    revalidatePath("/tenant");
+    revalidatePath("/tenant/agreement");
+    revalidatePath("/admin/agreements");
   }
   return result;
 }

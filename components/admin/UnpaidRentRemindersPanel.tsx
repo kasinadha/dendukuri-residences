@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { markRentRemindedAction, sendWhatsAppReminderAction } from "@/app/admin/ops-actions";
+import { markRentRemindedAction, sendAllUnpaidWhatsAppRemindersAction, sendWhatsAppReminderAction } from "@/app/admin/ops-actions";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr } from "@/lib/receipts";
 import type { UnpaidReminderRow } from "@/lib/reminders";
@@ -51,6 +51,9 @@ export default function UnpaidRentRemindersPanel({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
+  const [bulkMessage, setBulkMessage] = useState("");
+
+  const sendableCount = rows.filter((row) => row.phone).length;
 
   function markReminded(row: UnpaidReminderRow, channel: string) {
     setError("");
@@ -66,6 +69,40 @@ export default function UnpaidRentRemindersPanel({
         setError(result.error);
         return;
       }
+      router.refresh();
+    });
+  }
+
+  function sendAll() {
+    if (
+      !window.confirm(
+        `Send WhatsApp reminders to ${sendableCount} tenant${
+          sendableCount === 1 ? "" : "s"
+        } with outstanding dues?`
+      )
+    ) {
+      return;
+    }
+    setError("");
+    setBulkMessage("");
+    setPendingId("all");
+    const formData = new FormData();
+    formData.set("billing_month", billingMonthKey);
+    startTransition(async () => {
+      const result = await sendAllUnpaidWhatsAppRemindersAction(formData);
+      setPendingId(null);
+      if (!result.ok) {
+        setError("error" in result ? result.error : "Could not send reminders.");
+        return;
+      }
+      const failNote =
+        result.failed.length > 0
+          ? ` ${result.failed.length} failed.`
+          : "";
+      setBulkMessage(
+        `Sent ${result.sent}. Skipped ${result.skipped} without a mobile number.${failNote}`
+      );
+      if (result.failed[0]) setError(result.failed[0].error);
       router.refresh();
     });
   }
@@ -94,13 +131,30 @@ export default function UnpaidRentRemindersPanel({
           Monthly dues unpaid · {billingMonthLabel}
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          Rent plus maintenance, parking, washer, other monthly charges, and
-          electricity. Move-in month has no dues; vacating tenants appear for
+          Rent plus maintenance, parking, washer, other monthly charges, fines,
+          and electricity. Move-in month has no dues; vacating tenants appear for
           their final month only (set vacate date to close the account).
           {whatsappApiEnabled
             ? " Send directly from your business WhatsApp API, or open a draft in WhatsApp Web."
             : " Open WhatsApp with a pre-filled message, then mark reminded."}
         </p>
+        {whatsappApiEnabled && rows.length > 0 ? (
+          <button
+            type="button"
+            disabled={pending || sendableCount === 0}
+            onClick={sendAll}
+            className="mt-3 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {pending && pendingId === "all"
+              ? "Sending…"
+              : `Send reminders (${sendableCount})`}
+          </button>
+        ) : rows.length > 0 && !whatsappApiEnabled ? (
+          <p className="mt-3 text-xs text-slate-500">
+            Bulk send needs WhatsApp Cloud API. Use per-row drafts until it is
+            configured.
+          </p>
+        ) : null}
         <p className="mt-2 text-xs text-slate-600">
           Send from business WhatsApp{" "}
           <span className="font-semibold">{whatsappBusinessPhone}</span>
@@ -132,6 +186,12 @@ export default function UnpaidRentRemindersPanel({
           )}
         </p>
       </div>
+
+      {bulkMessage ? (
+        <p className="mx-5 mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800 sm:mx-6">
+          {bulkMessage}
+        </p>
+      ) : null}
 
       {error ? (
         <p className="mx-5 mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 sm:mx-6">
@@ -178,6 +238,9 @@ export default function UnpaidRentRemindersPanel({
                             : ""}
                           {row.otherMonthlyCharge > 0
                             ? ` · other ${formatInr(row.otherMonthlyCharge)}`
+                            : ""}
+                          {row.finesCharge > 0
+                            ? ` · fines ${formatInr(row.finesCharge)}`
                             : ""}
                           {row.electricityCharge > 0
                             ? ` · electricity ${formatInr(row.electricityCharge)}`
