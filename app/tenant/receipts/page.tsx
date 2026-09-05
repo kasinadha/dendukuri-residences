@@ -1,12 +1,6 @@
 import Link from "next/link";
-import DownloadHraButton from "@/components/receipts/DownloadHraButton";
 import { requireTenant } from "@/lib/auth";
-import {
-  formatDisplayDate,
-  formatInr,
-  hraRentPaid,
-  listReceiptViews,
-} from "@/lib/receipts";
+import { formatDisplayDate, formatInr, listReceiptViews } from "@/lib/receipts";
 import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 
 export default async function TenantReceiptsPage() {
@@ -25,9 +19,7 @@ export default async function TenantReceiptsPage() {
         Your rent receipts
       </h2>
       <p className="mt-2 text-slate-500">
-        View-only access to receipts for your tenancy. Download an HRA PDF when
-        the payment includes house rent (electricity, washer, and other dues are
-        excluded).
+        View-only access to receipts for your tenancy.
       </p>
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -102,9 +94,6 @@ export default async function TenantReceiptsPage() {
                     </>
                   )}
                 </div>
-                {hraRentPaid(receipt) > 0 ? (
-                  <DownloadHraButton receipt={receipt} />
-                ) : null}
               </li>
             ))}
           </ul>

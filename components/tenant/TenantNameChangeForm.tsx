@@ -23,7 +23,8 @@ export default function TenantNameChangeForm({
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     startTransition(async () => {
       const result = await tenantSubmitNameChangeAction(formData);
       if (!result.ok) {
@@ -31,17 +32,25 @@ export default function TenantNameChangeForm({
         return;
       }
       setSuccess("Sent to the owner for approval.");
-      event.currentTarget.reset();
+      form.reset();
       router.refresh();
     });
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h3 className="text-lg font-bold text-slate-900">Your name</h3>
+    <section
+      id="name-correction"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <h3 className="text-lg font-bold text-slate-900">
+        Wrong name or other details?
+      </h3>
       <p className="mt-1 text-sm text-slate-500">
-        Name on file: <span className="font-semibold text-slate-800">{currentName}</span>.
-        Changes go to the owner for approval before receipts and the portal update.
+        Name on file:{" "}
+        <span className="font-semibold text-slate-800">{currentName}</span>.
+        Request a spelling fix, a different name for receipts, or report anything
+        that does not match your records. The owner approves it before the portal
+        updates.
       </p>
 
       {pending ? (
@@ -67,7 +76,7 @@ export default function TenantNameChangeForm({
       <form onSubmit={handleSubmit} className="mt-4 grid gap-3">
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            New name
+            Correct name
           </span>
           <input
             name="full_name"
@@ -80,10 +89,11 @@ export default function TenantNameChangeForm({
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Note for the owner (optional)
+            What is wrong? (optional)
           </span>
           <input
             name="tenant_note"
+            placeholder="Spelling, extra initials, wrong person…"
             disabled={Boolean(pending) || busy}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm disabled:bg-slate-50"
           />
@@ -101,7 +111,7 @@ export default function TenantNameChangeForm({
           disabled={Boolean(pending) || busy}
           className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
         >
-          {busy ? "Sending…" : "Request name update"}
+          {busy ? "Sending…" : "Send request to owner"}
         </button>
       </form>
     </section>

@@ -214,7 +214,8 @@ export default function UnpaidRentRemindersPanel({
             </>
           ) : (
             " via API, or open a draft in WhatsApp Web."
-          )}
+          )}{" "}
+          Daily automatic send is 9:00 AM IST when Cloud API and approved message templates are configured.
         </p>
       </div>
 

@@ -67,7 +67,7 @@ export const tenantFaqSections: TenantFaqSection[] = [
         id: "navigation",
         question: "What can I do from the menu?",
         answer:
-          "After login, use the top menu: Home, Pay rent, Receipts, Electricity, Maintenance, and Move / transfer.",
+          "After login, use the top menu: Home, Pay dues, Receipts, Electricity, Maintenance, Agreement, Move / transfer, and Help.",
         mockup: "home",
         steps: [
           { title: "Home", detail: "See this month’s outstanding dues at a glance." },
@@ -76,6 +76,7 @@ export const tenantFaqSections: TenantFaqSection[] = [
           { title: "Electricity", detail: "View recent electricity bills for your flat." },
           { title: "Maintenance", detail: "Report repairs (tap leak, AC, etc.)." },
           { title: "Move / transfer", detail: "Request move-out or flat transfer." },
+          { title: "Help", detail: "FAQ, plus request a name fix if receipts look wrong." },
         ],
       },
     ],
@@ -273,6 +274,29 @@ export const tenantFaqSections: TenantFaqSection[] = [
         question: "The amount looks wrong",
         answer:
           "Check the billing month on Pay rent. Dues include rent + monthly charges + electricity. If still wrong, contact the owner with your flat number and month.",
+      },
+      {
+        id: "wrong-name",
+        question: "My name is wrong on receipts or the portal",
+        answer:
+          "Use the form at the top of this Help page (signed in as Tenant). Send the correct name and a short note — spelling mistake, extra initials, or the wrong person. The owner approves it before receipts and the portal update.",
+        steps: [
+          {
+            title: "Open Help while signed in",
+            detail: "Menu → Help, or this page after tenant login.",
+          },
+          {
+            title: "Enter the correct name",
+            detail: "Add an optional note about what is inconsistent.",
+          },
+          {
+            title: "Wait for approval",
+            detail: "The owner reviews the request under Admin → Tenants.",
+          },
+        ],
+        tips: [
+          "Not signed in? Tap Sign in first — the form only works with a tenant login.",
+        ],
       },
       {
         id: "move-in-month",

@@ -84,6 +84,15 @@ Share this link with all tenants on WhatsApp. It includes screenshots, step-by-s
 
 ---
 
+## 8. Wrong name on receipts
+
+1. Sign in as **Tenant**
+2. Open **Help**
+3. Use **Wrong name or other details?** at the top — enter the correct name and what is inconsistent
+4. Wait for the owner to approve; then receipts and the portal update
+
+---
+
 ## Monthly checklist
 
 - [ ] Check **Home** for outstanding

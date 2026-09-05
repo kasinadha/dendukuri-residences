@@ -4,15 +4,14 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import {
   approveTenancyAgreement,
-  buildAgreementReminderMessage,
   DEFAULT_AGREEMENT_BODY,
   DEFAULT_AGREEMENT_TITLE,
   generateDraftAgreementsForActiveTenancies,
   markAgreementReminded,
   publishAgreementTemplate,
+  sendAgreementWhatsAppReminder,
 } from "@/lib/agreements";
 import { recordWasteDumpingFine } from "@/lib/fines";
-import { sendWhatsAppBusinessMessage } from "@/lib/whatsapp";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -70,58 +69,14 @@ export async function markAgreementRemindedAction(formData: FormData) {
 
 export async function sendAgreementWhatsAppReminderAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
-  const agreementId = asString(formData, "id");
-  const tenancyId = asString(formData, "tenancy_id");
-  if (!agreementId || !tenancyId) {
-    return { ok: false as const, error: "Missing agreement." };
-  }
-
-  const { data, error } = await supabase
-    .from("tenancy_agreements")
-    .select(
-      `
-      id,
-      tenancy_id,
-      flat_number,
-      tenant_name,
-      monthly_rent,
-      tenancies ( tenants ( phone ) )
-    `
-    )
-    .eq("id", agreementId)
-    .maybeSingle();
-
-  if (error || !data) {
-    return { ok: false as const, error: error?.message ?? "Agreement not found." };
-  }
-
-  const tenancy = Array.isArray(data.tenancies) ? data.tenancies[0] : data.tenancies;
-  const tenant = Array.isArray(tenancy?.tenants) ? tenancy?.tenants[0] : tenancy?.tenants;
-  const phone = tenant?.phone?.trim() || null;
-  if (!phone) {
-    return { ok: false as const, error: "Tenant has no mobile number on file." };
-  }
-
-  const sendResult = await sendWhatsAppBusinessMessage({
-    toPhone: phone,
-    body: buildAgreementReminderMessage({
-      tenantName: data.tenant_name?.trim() || "Tenant",
-      flatNumber: data.flat_number?.trim() || "—",
-      monthlyRent: Number(data.monthly_rent) || 0,
-    }),
-  });
-  if (!sendResult.ok) return sendResult;
-
-  const markResult = await markAgreementReminded(supabase, {
-    agreementId,
-    tenancyId,
+  const result = await sendAgreementWhatsAppReminder(supabase, {
+    agreementId: asString(formData, "id"),
+    tenancyId: asString(formData, "tenancy_id"),
     remindedBy: user.id,
     channel: "whatsapp_api",
-    notes: `wa_message_id:${sendResult.messageId}`,
   });
-  if (!markResult.ok) return markResult;
-  revalidatePath("/admin/agreements");
-  return { ok: true as const };
+  if (result.ok) revalidatePath("/admin/agreements");
+  return result;
 }
 
 export async function recordWasteFineAction(formData: FormData) {

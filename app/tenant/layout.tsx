@@ -24,7 +24,10 @@ export default async function TenantLayout({
   const { supabase, user, profile } = await requireTenant();
   const ctx = await getTenantPortalContext(supabase, user.id);
   const pendingAgreement = ctx?.tenancyId
-    ? await getPendingApprovedAgreementForTenancy(supabase, ctx.tenancyId)
+    ? await getPendingApprovedAgreementForTenancy(
+        supabase,
+        ctx.tenancyId
+      ).catch(() => null)
     : null;
 
   return (

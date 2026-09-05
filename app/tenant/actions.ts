@@ -119,27 +119,33 @@ export async function tenantSubmitRentPayment(formData: FormData) {
 }
 
 export async function tenantCreateMaintenance(formData: FormData) {
-  const { supabase, user } = await requireTenant();
-  const ctx = await getTenantPortalContext(supabase, user.id);
-  if (!ctx?.flatId) {
-    return { ok: false as const, error: "No flat linked to your account." };
-  }
+  try {
+    const { supabase, user } = await requireTenant();
+    const ctx = await getTenantPortalContext(supabase, user.id);
+    if (!ctx?.flatId) {
+      return { ok: false as const, error: "No flat linked to your account." };
+    }
 
-  const result = await createMaintenanceRequest(supabase, {
-    flatId: ctx.flatId,
-    title: asString(formData, "title"),
-    description: asString(formData, "description") || null,
-    status: "open",
-    priority: asString(formData, "priority") || "normal",
-    category: asString(formData, "category") || "general",
-  });
+    const result = await createMaintenanceRequest(supabase, {
+      flatId: ctx.flatId,
+      title: asString(formData, "title"),
+      description: asString(formData, "description") || null,
+      status: "open",
+      priority: asString(formData, "priority") || "normal",
+      category: asString(formData, "category") || "general",
+    });
 
-  if (result.ok) {
-    revalidatePath("/tenant");
-    revalidatePath("/tenant/maintenance");
-    revalidatePath("/admin/maintenance");
+    if (result.ok) {
+      revalidatePath("/tenant");
+      revalidatePath("/tenant/maintenance");
+      revalidatePath("/admin/maintenance");
+    }
+    return result;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not submit the request.";
+    return { ok: false as const, error: message };
   }
-  return result;
 }
 
 export async function tenantCreateVacate(formData: FormData) {
@@ -181,6 +187,7 @@ export async function tenantSubmitNameChangeAction(formData: FormData) {
 
   if (result.ok) {
     revalidatePath("/tenant");
+    revalidatePath("/help");
     revalidatePath("/admin/tenants");
   }
   return result;

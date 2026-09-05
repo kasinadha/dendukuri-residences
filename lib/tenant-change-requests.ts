@@ -16,6 +16,16 @@ export type TenantChangeRequest = {
   reviewedAt: string | null;
 };
 
+export type HelpNameCorrection =
+  | { status: "guest" }
+  | { status: "unlinked" }
+  | {
+      status: "ready";
+      currentName: string;
+      pending: TenantChangeRequest | null;
+      latest: TenantChangeRequest | null;
+    };
+
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? value[0] ?? null : value;

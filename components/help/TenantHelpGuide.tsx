@@ -3,7 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import type { HelpNameCorrection } from "@/lib/tenant-change-requests";
 import HelpScreenMockup from "@/components/help/HelpScreenMockup";
+import TenantNameChangeForm from "@/components/tenant/TenantNameChangeForm";
 import {
   tenantFaqSections,
   type TenantFaqItem,
@@ -115,7 +117,58 @@ function SectionNav({
   );
 }
 
-export default function TenantHelpGuide() {
+function NameCorrectionPanel({
+  nameCorrection,
+}: {
+  nameCorrection: HelpNameCorrection;
+}) {
+  if (nameCorrection.status === "ready") {
+    return (
+      <TenantNameChangeForm
+        currentName={nameCorrection.currentName}
+        pending={nameCorrection.pending}
+        latest={nameCorrection.latest}
+      />
+    );
+  }
+
+  return (
+    <section
+      id="name-correction"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <h3 className="text-lg font-bold text-slate-900">
+        Wrong name or other details?
+      </h3>
+      <p className="mt-1 text-sm text-slate-500">
+        If receipts or the portal show the wrong spelling, extra initials, or
+        someone else&apos;s name, send a correction request after you sign in as
+        Tenant. The owner approves it before anything updates.
+      </p>
+      {nameCorrection.status === "unlinked" ? (
+        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Your login is not linked to a tenant record yet. Ask the owner to
+          connect it, then return here to send the request.
+        </p>
+      ) : (
+        <Link
+          href="/login?as=tenant"
+          className="mt-4 inline-flex rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white"
+        >
+          Sign in to send a request
+        </Link>
+      )}
+    </section>
+  );
+}
+
+export default function TenantHelpGuide({
+  isTenant,
+  nameCorrection,
+}: {
+  isTenant: boolean;
+  nameCorrection: HelpNameCorrection;
+}) {
   const [activeSection, setActiveSection] = useState(tenantFaqSections[0]?.id ?? "");
   const [query, setQuery] = useState("");
 
@@ -154,18 +207,29 @@ export default function TenantHelpGuide() {
             <h1 className="text-lg font-bold text-slate-900">Tenant help & FAQ</h1>
           </div>
           <div className="flex gap-2 text-sm">
-            <Link
-              href="/login"
-              className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/pay"
-              className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-700"
-            >
-              Pay without login
-            </Link>
+            {isTenant ? (
+              <Link
+                href="/tenant"
+                className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white"
+              >
+                Back to portal
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/pay"
+                  className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-700"
+                >
+                  Pay without login
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -176,9 +240,13 @@ export default function TenantHelpGuide() {
           Daily tasks — step by step
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
-          How to sign in, pay rent, view receipts, report maintenance, and move
-          out. Share this page with all tenants.
+          How to sign in, pay rent, view receipts, report maintenance, fix a
+          wrong name, and move out. Share this page with all tenants.
         </p>
+
+        <div className="mt-6">
+          <NameCorrectionPanel nameCorrection={nameCorrection} />
+        </div>
 
         <label className="mt-6 block">
           <span className="sr-only">Search help</span>
@@ -186,7 +254,7 @@ export default function TenantHelpGuide() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search — e.g. UTR, receipt, electricity…"
+            placeholder="Search — e.g. name, UTR, receipt, electricity…"
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm shadow-sm"
           />
         </label>
@@ -222,7 +290,8 @@ export default function TenantHelpGuide() {
           <p className="mt-1">
             Contact the property owner with your <strong>flat number</strong>,{" "}
             <strong>billing month</strong>, and <strong>UTR</strong> if payment
-            related.
+            related. For a wrong name on receipts, use the form at the top of
+            this page.
           </p>
           <p className="mt-3">
             <Link href="/login" className="font-semibold text-emerald-700">
