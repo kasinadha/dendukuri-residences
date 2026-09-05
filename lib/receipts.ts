@@ -429,15 +429,44 @@ export async function fetchReceiptViewById(
 
 export async function listReceiptViews(
   supabase: SupabaseClient,
-  options?: { limit?: number }
+  options?: { limit?: number; tenantProfileId?: string }
 ): Promise<ReceiptViewModel[]> {
   const limit = options?.limit ?? 50;
+  let paymentIdFilter: string[] | null = null;
 
-  const { data: receipts, error } = await supabase
+  if (options?.tenantProfileId) {
+    const { data: tenantRows } = await supabase
+      .from("tenants")
+      .select("id")
+      .eq("profile_id", options.tenantProfileId);
+    const tenantIds = (tenantRows ?? []).map((row) => String(row.id));
+    if (tenantIds.length === 0) return [];
+
+    const { data: tenancyRows } = await supabase
+      .from("tenancies")
+      .select("id")
+      .in("tenant_id", tenantIds);
+    const tenancyIds = (tenancyRows ?? []).map((row) => String(row.id));
+    if (tenancyIds.length === 0) return [];
+
+    const { data: paymentRows } = await supabase
+      .from("payments")
+      .select("id")
+      .in("tenancy_id", tenancyIds);
+    paymentIdFilter = (paymentRows ?? []).map((row) => String(row.id));
+    if (paymentIdFilter.length === 0) return [];
+  }
+
+  let query = supabase
     .from("receipts")
     .select("id,receipt_number,payment_id,created_at")
     .order("created_at", { ascending: false })
     .limit(limit);
+  if (paymentIdFilter) {
+    query = query.in("payment_id", paymentIdFilter);
+  }
+
+  const { data: receipts, error } = await query;
 
   if (error || !receipts?.length) return [];
 

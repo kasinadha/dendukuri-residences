@@ -3,13 +3,13 @@
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { classifyLoginIdentifier } from "@/lib/login-identifier";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { tenantLoginEmailCandidates } from "@/lib/tenant-auth";
 
 export type SignInResult = { ok: false; error: string };
 
 async function resolveEmailForSignIn(
-  supabase: Awaited<ReturnType<typeof createClient>>,
   identifier: string
 ): Promise<{ email: string | null; mobile: string | null; error?: string }> {
   const classified = classifyLoginIdentifier(identifier);
@@ -19,7 +19,12 @@ async function resolveEmailForSignIn(
   }
 
   if (classified.kind === "mobile" && classified.mobile) {
-    const { data, error } = await supabase.rpc("resolve_login_email", {
+    const admin = createAdminClient();
+    if (!admin.ok) {
+      return { email: null, mobile: classified.mobile };
+    }
+
+    const { data, error } = await admin.client.rpc("resolve_login_email", {
       identifier: classified.mobile,
     });
 
@@ -86,7 +91,7 @@ export async function signInWithPasswordAction(
   }
 
   const supabase = await createClient();
-  const resolved = await resolveEmailForSignIn(supabase, identifier);
+  const resolved = await resolveEmailForSignIn(identifier);
 
   if (resolved.error && !resolved.email && !resolved.mobile) {
     return { ok: false, error: resolved.error };

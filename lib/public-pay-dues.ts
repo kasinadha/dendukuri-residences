@@ -217,7 +217,7 @@ export async function getTenancyDuesBreakdown(
   };
 }
 
-/** Current month breakdown plus outstanding from the prior billing month only. */
+/** Current month breakdown plus outstanding from up to 12 prior billing months. */
 export async function getTenancyDuesBreakdownWithArrears(
   supabase: SupabaseClient,
   input: {
@@ -230,7 +230,7 @@ export async function getTenancyDuesBreakdownWithArrears(
   if (!current.ok) return current;
 
   const arrears: ArrearsMonthBreakdown[] = [];
-  for (const monthKey of priorBillingMonthKeys(input.billingMonthKey, 1)) {
+  for (const monthKey of priorBillingMonthKeys(input.billingMonthKey, 12)) {
     const monthDue = await loadMonthDueForTenancy(
       supabase,
       input.tenancyId,
@@ -284,7 +284,7 @@ export async function getPublicPayDuesBreakdown(input: {
   return getTenancyDuesBreakdownWithArrears(admin.client, input);
 }
 
-/** Recompute breakdown from ledger + bills; fall back to stored notes if needed. */
+/** Prefer the payment's stored snapshot so later payments do not rewrite old receipts. */
 export async function resolveReceiptDuesBreakdown(
   supabase: SupabaseClient,
   input: {
@@ -294,6 +294,9 @@ export async function resolveReceiptDuesBreakdown(
     billingMonthKey: string | null;
   }
 ): Promise<DuesBreakdown | null> {
+  const fromNotes = parseDuesBreakdownFromNotes(input.notes);
+  if (fromNotes) return fromNotes;
+
   if (input.tenancyId && input.flatId && input.billingMonthKey) {
     const computed = await getTenancyDuesBreakdown(supabase, {
       tenancyId: input.tenancyId,
@@ -303,7 +306,7 @@ export async function resolveReceiptDuesBreakdown(
     if (computed.ok) return computed.breakdown;
   }
 
-  return parseDuesBreakdownFromNotes(input.notes);
+  return null;
 }
 
 export function parseDuesBreakdownJson(raw: string): DuesBreakdown | null {

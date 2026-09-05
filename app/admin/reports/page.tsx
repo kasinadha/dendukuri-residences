@@ -4,6 +4,7 @@ import VacateAdminList from "@/components/admin/VacateAdminList";
 import { requireAdmin } from "@/lib/auth";
 import { getBuildingRevenueReport } from "@/lib/building-revenue";
 import { listFlatsForAdmin } from "@/lib/flats";
+import { getMonthlyDuesSummary } from "@/lib/monthly-dues";
 import { listVacateRequests } from "@/lib/ops";
 import { currentBillingMonthKey } from "@/lib/rent-upi";
 import { formatBillingMonthLabel, formatInr, listReceiptViews } from "@/lib/receipts";
@@ -20,11 +21,12 @@ export default async function ReportsPage({ searchParams }: Props) {
       ? params.month
       : currentBillingMonthKey();
 
-  const [receipts, vacates, flats, revenueReport] = await Promise.all([
+  const [receipts, vacates, flats, revenueReport, duesMonth] = await Promise.all([
     listReceiptViews(supabase, { limit: 12 }),
     listVacateRequests(supabase),
     listFlatsForAdmin(supabase),
     getBuildingRevenueReport(supabase, { billingMonth: month }),
+    getMonthlyDuesSummary(supabase, month),
   ]);
 
   const collected = receipts.reduce((sum, r) => sum + r.rentAmount, 0);
@@ -72,7 +74,7 @@ export default async function ReportsPage({ searchParams }: Props) {
         billingMonthLabel={formatBillingMonthLabel(month)}
       />
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-sm text-slate-500">Recent receipts total</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
@@ -89,6 +91,31 @@ export default async function ReportsPage({ searchParams }: Props) {
           </p>
           <p className="mt-2 text-xs text-slate-500">
             {vacates.filter((v) => v.status === "pending").length} pending
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-500">
+            Collection rate · {formatBillingMonthLabel(month)}
+          </p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">
+            {duesMonth.collectionRatePercent != null
+              ? `${duesMonth.collectionRatePercent}%`
+              : "—"}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            {formatInr(duesMonth.totalCollected)} of{" "}
+            {formatInr(duesMonth.totalExpected)}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-500">Longest delay</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">
+            {duesMonth.delayedDaysMax > 0
+              ? `${duesMonth.delayedDaysMax} days`
+              : "On time"}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            {duesMonth.overdueTenants} overdue after the 5th
           </p>
         </div>
       </div>

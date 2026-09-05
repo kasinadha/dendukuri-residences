@@ -23,6 +23,30 @@ import {
   type LedgerPayment,
 } from "@/lib/payment-attribution";
 
+function istTodayIsoDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/** Days past the 5th of the billing month for an unpaid row (IST calendar days). */
+export function delayedDaysPastDue(
+  billingMonthKey: string,
+  outstanding: number,
+  todayIso = istTodayIsoDate()
+): number {
+  if (outstanding <= 0 || !/^\d{4}-\d{2}$/.test(billingMonthKey)) return 0;
+  const dueIso = `${billingMonthKey}-05`;
+  if (todayIso <= dueIso) return 0;
+  const due = Date.parse(`${dueIso}T00:00:00+05:30`);
+  const today = Date.parse(`${todayIso}T00:00:00+05:30`);
+  if (!Number.isFinite(due) || !Number.isFinite(today) || today <= due) return 0;
+  return Math.floor((today - due) / 86_400_000);
+}
+
 function currentMonthKey(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -84,6 +108,8 @@ export type MonthlyDuesSummary = {
   totalExpected: number;
   totalCollected: number;
   outstanding: number;
+  collectionRatePercent: number | null;
+  delayedDaysMax: number;
   paidTenants: number;
   pendingTenants: number;
   partialTenants: number;
@@ -500,6 +526,14 @@ export async function getMonthlyDuesSummary(
   const totalExpected = rows.reduce((s, r) => s + r.totalDue, 0);
   const totalCollected = rows.reduce((s, r) => s + r.amountPaid, 0);
   const outstanding = rows.reduce((s, r) => s + r.outstanding, 0);
+  const collectionRatePercent =
+    totalExpected > 0
+      ? Math.round((totalCollected / totalExpected) * 100)
+      : null;
+  const delayedDaysMax = rows.reduce(
+    (max, row) => Math.max(max, delayedDaysPastDue(monthKey, row.outstanding)),
+    0
+  );
 
   return {
     billingMonthKey: monthKey,
@@ -507,6 +541,8 @@ export async function getMonthlyDuesSummary(
     totalExpected,
     totalCollected,
     outstanding,
+    collectionRatePercent,
+    delayedDaysMax,
     paidTenants: rows.filter((r) => r.status === "paid" || r.status === "waived")
       .length,
     pendingTenants: rows.filter(

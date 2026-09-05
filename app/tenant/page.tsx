@@ -21,9 +21,9 @@ export default async function TenantHomePage() {
   const { supabase, user, profile } = await requireTenant();
   const ctx = await getTenantPortalContext(supabase, user.id);
   const duesClient = getTenantDuesSupabaseClient(supabase);
-  const receipts = (await listReceiptViews(duesClient, { limit: 20 })).filter(
-    (row) => row.tenantProfileId === user.id
-  );
+  const receipts = (
+    await listReceiptViews(duesClient, { limit: 20, tenantProfileId: user.id })
+  ).filter((row) => row.tenantProfileId === user.id);
   const electricity = ctx?.flatId
     ? await listElectricityReadings(supabase, { flatId: ctx.flatId, limit: 3 })
     : [];

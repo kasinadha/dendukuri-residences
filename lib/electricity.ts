@@ -158,6 +158,7 @@ export async function listFlatsForElectricityBilling(
     });
   }
 
+  const lastByFlatId = await getLastReadingsByFlatId(supabase);
   const results: OccupiedFlatForBilling[] = [];
   for (const [flatId, { flatNumber, tenancies }] of byFlat) {
     const occupancy = describeFlatBillingOccupancy(
@@ -170,13 +171,12 @@ export async function listFlatsForElectricityBilling(
       billingMonthKey
     );
 
-    const last = await getLastReadingForFlat(supabase, flatId);
     results.push({
       flatId,
       flatNumber,
       tenantName: occupancy.tenantName,
       buildingWing: buildingWingFromFlatNumber(flatNumber),
-      previousReading: last?.currentReading ?? 0,
+      previousReading: lastByFlatId[flatId] ?? 0,
       sanctionedKw: 2,
       occupancyKind: occupancy.occupancyKind,
       occupancyNote: occupancy.occupancyNote || undefined,
