@@ -13,7 +13,14 @@ export type TenantFaqItem = {
   imageAlt?: string;
   imageCaption?: string;
   /** Inline visual mockup when a real screenshot needs login */
-  mockup?: "home" | "pay" | "receipts" | "electricity" | "maintenance" | "vacate";
+  mockup?:
+    | "home"
+    | "pay"
+    | "receipts"
+    | "electricity"
+    | "maintenance"
+    | "vacate"
+    | "cameras";
   tips?: string[];
 };
 
@@ -67,16 +74,42 @@ export const tenantFaqSections: TenantFaqSection[] = [
         id: "navigation",
         question: "What can I do from the menu?",
         answer:
-          "After login, use the top menu: Home, Pay dues, Receipts, Electricity, Maintenance, Agreement, Move / transfer, and Help.",
+          "After login, use the top menu: Home, Pay dues, Receipts, Cameras, Electricity, Maintenance, Agreement, Move / transfer, and Help.",
         mockup: "home",
         steps: [
           { title: "Home", detail: "See this month’s outstanding dues at a glance." },
           { title: "Pay rent", detail: "UPI payment + submit UTR for confirmation." },
           { title: "Receipts", detail: "Download PDF receipts after owner approval." },
+          { title: "Cameras", detail: "Live view of gate, parking, and other common areas." },
           { title: "Electricity", detail: "View recent electricity bills for your flat." },
           { title: "Maintenance", detail: "Report repairs (tap leak, AC, etc.)." },
           { title: "Move / transfer", detail: "Request move-out or flat transfer." },
           { title: "Help", detail: "FAQ, plus request a name fix if receipts look wrong." },
+        ],
+      },
+      {
+        id: "cameras",
+        question: "Can I watch the CCTV cameras?",
+        answer:
+          "Yes. After you sign in as Tenant, open Cameras in the menu. You will see live views of shared spaces such as the gate, parking, and lobby. The public website does not show a live feed.",
+        mockup: "cameras",
+        steps: [
+          {
+            title: "Sign in as Tenant",
+            detail: "Use your registered mobile or email. Do not use the Admin tab.",
+          },
+          {
+            title: "Open Cameras",
+            detail: "Menu → Cameras, or tap Cameras on Home.",
+          },
+          {
+            title: "View live",
+            detail: "Tap View live on a camera. Some cameras open in a new tab if they use a Hik-Connect share link.",
+          },
+        ],
+        tips: [
+          "Only common-area cameras are shared. Flat interiors are never shown.",
+          "If the list is empty, ask the owner to add cameras under Admin → Cameras.",
         ],
       },
     ],

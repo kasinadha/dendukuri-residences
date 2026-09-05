@@ -16,6 +16,7 @@ function MockupChrome({ children }: { children: ReactNode }) {
         <span className="rounded-lg bg-slate-100 px-2 py-1 text-slate-800">Home</span>
         <span className="rounded-lg px-2 py-1">Pay rent</span>
         <span className="rounded-lg px-2 py-1">Receipts</span>
+        <span className="rounded-lg px-2 py-1">Cameras</span>
         <span className="rounded-lg px-2 py-1">Electricity</span>
         <span className="rounded-lg px-2 py-1">Maintenance</span>
         <span className="rounded-lg px-2 py-1">Move</span>
@@ -144,6 +145,28 @@ function MaintenanceMockup() {
   );
 }
 
+function CamerasMockup() {
+  return (
+    <MockupChrome>
+      <div className="space-y-3 p-3">
+        <p className="text-xs font-bold text-slate-900">Common-area cameras</p>
+        <div className="rounded-lg border border-slate-100 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-slate-900">Main gate</p>
+              <p className="text-[10px] text-slate-500">Gate / parking</p>
+            </div>
+            <span className="rounded-lg bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white">
+              View live
+            </span>
+          </div>
+          <div className="mt-3 aspect-video rounded-lg bg-slate-900" />
+        </div>
+      </div>
+    </MockupChrome>
+  );
+}
+
 function VacateMockup() {
   return (
     <MockupChrome>
@@ -169,6 +192,7 @@ const mockups: Record<MockupKind, () => ReactElement> = {
   electricity: ElectricityMockup,
   maintenance: MaintenanceMockup,
   vacate: VacateMockup,
+  cameras: CamerasMockup,
 };
 
 export default function HelpScreenMockup({ kind }: { kind: MockupKind }) {

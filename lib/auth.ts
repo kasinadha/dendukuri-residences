@@ -87,3 +87,26 @@ export async function requireTenant(): Promise<SessionContext> {
     profile: session.profile,
   };
 }
+
+/** Admin or tenant session. Redirects guests to login. */
+export async function requireAdminOrTenant(): Promise<SessionContext> {
+  const session = await getSessionProfile();
+
+  if (!session.user) {
+    redirect("/login?error=session");
+  }
+
+  if (
+    !session.profile ||
+    !session.profile.is_active ||
+    (session.profile.role !== "admin" && session.profile.role !== "tenant")
+  ) {
+    redirect("/login?error=unauthorized");
+  }
+
+  return {
+    supabase: session.supabase,
+    user: session.user,
+    profile: session.profile,
+  };
+}

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   IndianRupee,
   ScrollText,
+  Cctv,
 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
@@ -148,6 +149,12 @@ export default async function TenantHomePage() {
             icon: Receipt,
             title: "Rent receipts",
             detail: "View, print, and download PDFs",
+          },
+          {
+            href: "/tenant/cameras",
+            icon: Cctv,
+            title: "Cameras",
+            detail: "Common-area live view",
           },
           {
             href: "/tenant/electricity",

@@ -12,6 +12,7 @@ import {
   Droplets,
   Wrench,
   ArrowRight,
+  Cctv,
 } from "lucide-react";
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
@@ -261,6 +262,11 @@ export default async function AdminDashboard() {
                 href: "/admin/tenants",
                 icon: Users,
                 label: "Review Tenants",
+              },
+              {
+                href: "/admin/cameras",
+                icon: Cctv,
+                label: "View cameras",
               },
               {
                 href: "/admin/maintenance",

@@ -17,6 +17,7 @@ import {
   CircleHelp,
   BarChart3,
   Building2,
+  Cctv,
 } from "lucide-react";
 
 export const adminNavItems = [
@@ -28,6 +29,7 @@ export const adminNavItems = [
   { label: "Rent & Payments", href: "/admin/payments", icon: IndianRupee },
   { label: "Accounts", href: "/admin/accounts", icon: Landmark },
   { label: "Electricity", href: "/admin/electricity", icon: Zap },
+  { label: "Cameras", href: "/admin/cameras", icon: Cctv },
   { label: "Maintenance", href: "/admin/maintenance", icon: Wrench },
   { label: "Water Tankers", href: "/admin/water", icon: Droplets },
   { label: "Other Expenses", href: "/admin/expenses", icon: Receipt },

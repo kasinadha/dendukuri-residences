@@ -30,7 +30,7 @@ const gallery = [
 
 const amenities = [
   { icon: Car, title: "Vehicle Parking", text: "Dedicated two & four-wheeler parking." },
-  { icon: Cctv, title: "CCTV Surveillance", text: "Security monitoring for common areas." },
+  { icon: Cctv, title: "CCTV Surveillance", text: "Common-area cameras. Residents can watch live after signing in." },
   { icon: Users, title: "Family Friendly", text: "A peaceful residential environment for families." },
   { icon: ShieldCheck, title: "Well Maintained", text: "Clean, modern and carefully maintained property." },
 ];
@@ -48,6 +48,7 @@ export default function HomePage() {
             <a href="#about" className="transition hover:text-white">About</a>
             <a href="#homes" className="transition hover:text-white">Homes</a>
             <a href="#amenities" className="transition hover:text-white">Amenities</a>
+            <a href="#cameras" className="transition hover:text-white">Cameras</a>
             <a href="#gallery" className="transition hover:text-white">Gallery</a>
             <a href="#contact" className="transition hover:text-white">Contact</a>
           </nav>
@@ -258,6 +259,46 @@ export default function HomePage() {
                 <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="cameras" className="bg-slate-50 py-24">
+        <div className="mx-auto grid max-w-7xl gap-14 px-5 lg:grid-cols-2 lg:items-center lg:px-8">
+          <div>
+            <p className="font-semibold uppercase tracking-[0.2em] text-emerald-600">
+              Security
+            </p>
+            <h2 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
+              Common-area cameras for residents.
+            </h2>
+            <p className="mt-6 text-lg leading-8 text-slate-600">
+              Gate, parking, and lobby cameras are for signed-in tenants and the
+              owner — not a public live stream. Sign in as Tenant or Admin to
+              watch.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <a
+                href="/login?as=tenant"
+                className="inline-flex rounded-full bg-emerald-600 px-7 py-3.5 font-semibold text-white transition hover:bg-emerald-500"
+              >
+                Tenant sign in
+              </a>
+              <a
+                href="/login?as=admin"
+                className="inline-flex rounded-full border border-slate-300 px-7 py-3.5 font-semibold text-slate-800 transition hover:border-emerald-400 hover:text-emerald-800"
+              >
+                Admin sign in
+              </a>
+            </div>
+          </div>
+          <div className="relative aspect-[4/3] overflow-hidden rounded-[2rem]">
+            <Image
+              src="/images/Building.jpg"
+              alt="Dendukuri's Residences building"
+              fill
+              className="object-cover"
+            />
           </div>
         </div>
       </section>
