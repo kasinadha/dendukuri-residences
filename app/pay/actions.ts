@@ -10,6 +10,7 @@ import {
   submitPublicPaymentClaim,
   type PaymentPurpose,
 } from "@/lib/public-pay";
+import { loadPayUpiFallback } from "@/lib/pay-upi-defaults";
 import { resolveRentUpiDisplay } from "@/lib/rent-upi";
 import { createClient } from "@/lib/supabase/server";
 import { parseRupeeAmount } from "@/lib/money";
@@ -37,10 +38,13 @@ export async function lookupPublicFlatAction(formData: FormData) {
   const result = await lookupFlatForPublicPay(supabase, flatNumber);
   if (!result.ok) return result;
 
-  const upi = resolveRentUpiDisplay({
-    upiId: result.flat.upiId,
-    upiQrUrl: result.flat.upiQrUrl,
-  });
+  const upi = resolveRentUpiDisplay(
+    {
+      upiId: result.flat.upiId,
+      upiQrUrl: result.flat.upiQrUrl,
+    },
+    await loadPayUpiFallback()
+  );
 
   return {
     ok: true as const,
@@ -88,10 +92,13 @@ export async function submitPublicPayClaimAction(formData: FormData) {
     const lookup = await lookupFlatForPublicPay(supabase, flatNumber);
     if (!lookup.ok) return lookup;
 
-    const { upiId } = resolveRentUpiDisplay({
-      upiId: lookup.flat.upiId,
-      upiQrUrl: lookup.flat.upiQrUrl,
-    });
+    const { upiId } = resolveRentUpiDisplay(
+      {
+        upiId: lookup.flat.upiId,
+        upiQrUrl: lookup.flat.upiQrUrl,
+      },
+      await loadPayUpiFallback()
+    );
 
     const billingMonth = asString(formData, "billing_month") || null;
 

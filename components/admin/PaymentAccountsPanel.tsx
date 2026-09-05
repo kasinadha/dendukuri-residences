@@ -45,9 +45,10 @@ export default function PaymentAccountsPanel({
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
         <h3 className="text-lg font-bold text-slate-900">Payment accounts</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Map each UPI ID or QR image to Joint, Kasi, Kanthu, or Pratyu. Rent
-          received via a flat&apos;s QR auto-tags the matching account. You can
-          still override when recording payments.
+          Map each owner UPI ID or QR image to Joint, Kasi, Kanthu, or Pratyu.
+          Per-flat UPI and QR are edited in the section below. Rent received via
+          a flat&apos;s QR auto-tags the matching account unless you set
+          &quot;Credit to account&quot; on that flat.
         </p>
       </div>
 

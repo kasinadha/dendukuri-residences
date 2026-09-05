@@ -1,9 +1,14 @@
 import AdminLayout from "@/components/admin/AdminLayout";
 import BuildingRevenuePanel from "@/components/admin/BuildingRevenuePanel";
+import FlatUpiAccountsPanel from "@/components/admin/FlatUpiAccountsPanel";
 import PaymentAccountsPanel from "@/components/admin/PaymentAccountsPanel";
 import { requireAdmin } from "@/lib/auth";
 import { getBuildingRevenueReport } from "@/lib/building-revenue";
-import { listPaymentAccounts } from "@/lib/payment-accounts";
+import { listFlatsForUpiMapping } from "@/lib/flats";
+import {
+  listPaymentAccounts,
+  toPaymentAccountOptions,
+} from "@/lib/payment-accounts";
 import { currentBillingMonthKey } from "@/lib/rent-upi";
 import { formatBillingMonthLabel } from "@/lib/receipts";
 
@@ -19,10 +24,12 @@ export default async function AccountsPage({ searchParams }: Props) {
       ? params.month
       : currentBillingMonthKey();
 
-  const [{ accounts, error, tableMissing }, revenueReport] = await Promise.all([
-    listPaymentAccounts(supabase, { activeOnly: false }),
-    getBuildingRevenueReport(supabase, { billingMonth: month }),
-  ]);
+  const [{ accounts, error, tableMissing }, revenueReport, flats] =
+    await Promise.all([
+      listPaymentAccounts(supabase, { activeOnly: false }),
+      getBuildingRevenueReport(supabase, { billingMonth: month }),
+      listFlatsForUpiMapping(supabase),
+    ]);
 
   return (
     <AdminLayout>
@@ -32,9 +39,10 @@ export default async function AccountsPage({ searchParams }: Props) {
           Accounts & QR mapping
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
-          Link each receive QR or UPI ID to Joint, Kasi, Kanthu, or Pratyu.
-          Deposits are tracked separately from monthly dues. See deposit
-          balances by building on top, then dues income and expenses below.
+          Map owner receive accounts (Joint, Kasi, Kanthu, Pratyu), then set a
+          UPI ID and QR for each flat. Tenants pay with the flat&apos;s UPI
+          first; empty flats fall back to Joint. Deposits stay separate from
+          monthly dues.
         </p>
         <form method="get" className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block">
@@ -66,6 +74,11 @@ export default async function AccountsPage({ searchParams }: Props) {
         accounts={accounts}
         loadError={error}
         tableMissing={tableMissing}
+      />
+
+      <FlatUpiAccountsPanel
+        flats={flats}
+        accounts={toPaymentAccountOptions(accounts)}
       />
     </AdminLayout>
   );

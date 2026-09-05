@@ -2,6 +2,7 @@ import TenantRentPaymentForm from "@/components/tenant/TenantRentPaymentForm";
 import { requireTenant } from "@/lib/auth";
 import { breakdownGrandOutstanding } from "@/lib/dues-breakdown";
 import { getFlatPaymentDetails } from "@/lib/flats";
+import { loadPayUpiFallback } from "@/lib/pay-upi-defaults";
 import { listPaymentSubmissions } from "@/lib/payment-submissions";
 import { getTenancyDuesBreakdownWithArrears } from "@/lib/public-pay-dues";
 import { formatBillingMonthLabel, formatInr } from "@/lib/receipts";
@@ -18,7 +19,11 @@ export default async function TenantPayPage() {
   const flatUpi = ctx?.flatId
     ? await getFlatPaymentDetails(supabase, ctx.flatId)
     : null;
-  const { upiId, upiQrUrl, payeeName } = resolveRentUpiDisplay(flatUpi);
+  const payFallback = await loadPayUpiFallback();
+  const { upiId, upiQrUrl, payeeName } = resolveRentUpiDisplay(
+    flatUpi,
+    payFallback
+  );
   const billingMonth = currentBillingMonthKey();
   const duesClient = getTenantDuesSupabaseClient(supabase);
   const duesResult =

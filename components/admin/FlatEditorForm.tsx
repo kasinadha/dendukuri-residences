@@ -197,7 +197,7 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
           />
           <span className="mt-1 block text-xs text-slate-500">
             Shown on the tenant pay page for this flat. Leave blank to use the
-            global env UPI.
+            Joint account UPI from Admin → Accounts, then the global env UPI.
           </span>
         </label>
 

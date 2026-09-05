@@ -10,6 +10,7 @@ import {
   uploadPaymentProof,
   validatePaymentProofFile,
 } from "@/lib/payment-proofs";
+import { loadPayUpiFallback } from "@/lib/pay-upi-defaults";
 import { createPaymentSubmission } from "@/lib/payment-submissions";
 import {
   getTenancyDuesBreakdownWithArrears,
@@ -90,7 +91,7 @@ export async function tenantSubmitRentPayment(formData: FormData) {
     const flatUpi = ctx.flatId
       ? await getFlatPaymentDetails(supabase, ctx.flatId)
       : null;
-    const { upiId } = resolveRentUpiDisplay(flatUpi);
+    const { upiId } = resolveRentUpiDisplay(flatUpi, await loadPayUpiFallback());
     const amount = parseRupeeAmount(asString(formData, "amount"));
     const billingMonth = asString(formData, "billing_month");
     if (amount == null) {

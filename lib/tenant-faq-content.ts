@@ -300,7 +300,7 @@ export const tenantFaqSections: TenantFaqSection[] = [
       {
         id: "no-upi",
         question: "UPI ID or QR is missing on Pay rent",
-        answer: "The owner has not set UPI for your flat yet. Ask them to update Admin → Flats → Edit your flat.",
+        answer: "The owner has not set UPI for your flat yet. Ask them to update Admin → Accounts (per-flat UPI) or Admin → Flats → Edit your flat.",
       },
       {
         id: "wrong-amount",
