@@ -3,6 +3,13 @@
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { tenantCreateMaintenance } from "@/app/tenant/actions";
+import {
+  isVideoMime,
+  MAINTENANCE_MEDIA_ACCEPT,
+  MAX_MAINTENANCE_MEDIA,
+  MAX_MAINTENANCE_VIDEOS,
+  mimeOfFile,
+} from "@/lib/storage-uploads";
 
 export default function TenantMaintenanceForm() {
   const router = useRouter();
@@ -16,11 +23,16 @@ export default function TenantMaintenanceForm() {
     setSuccess("");
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const photoCount = formData.getAll("photos").filter(
-      (item) => item instanceof File && item.size > 0
-    ).length;
-    if (photoCount > 4) {
-      setError("Upload up to 4 photos.");
+    const files = formData
+      .getAll("photos")
+      .filter((item): item is File => item instanceof File && item.size > 0);
+    if (files.length > MAX_MAINTENANCE_MEDIA) {
+      setError(`Upload up to ${MAX_MAINTENANCE_MEDIA} photos or videos.`);
+      return;
+    }
+    const videoCount = files.filter((file) => isVideoMime(mimeOfFile(file))).length;
+    if (videoCount > MAX_MAINTENANCE_VIDEOS) {
+      setError(`Upload up to ${MAX_MAINTENANCE_VIDEOS} videos.`);
       return;
     }
     startTransition(async () => {
@@ -89,15 +101,19 @@ export default function TenantMaintenanceForm() {
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Photos (optional)
+            Photos or videos (optional)
           </span>
           <input
             name="photos"
             type="file"
             multiple
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            accept={MAINTENANCE_MEDIA_ACCEPT}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Up to {MAX_MAINTENANCE_MEDIA} files. Photos 5 MB. Videos 25 MB, max{" "}
+            {MAX_MAINTENANCE_VIDEOS}.
+          </span>
         </label>
       </div>
       {error ? (

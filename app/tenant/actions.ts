@@ -167,7 +167,7 @@ export async function tenantCreateMaintenance(formData: FormData) {
     if (isCleanliness && photos.length === 0) {
       return {
         ok: false as const,
-        error: "Upload at least one photo of the cleanliness issue.",
+        error: "Upload at least one photo or video of the cleanliness issue.",
       };
     }
 

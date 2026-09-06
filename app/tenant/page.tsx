@@ -167,7 +167,7 @@ export default async function TenantHomePage() {
             href: "/tenant/maintenance",
             icon: Wrench,
             title: "Maintenance",
-            detail: "Repairs, or cleanliness with photos",
+            detail: "Repairs, or cleanliness with photos or video",
           },
           {
             href: "/tenant/documents",

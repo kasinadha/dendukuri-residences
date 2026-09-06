@@ -1,5 +1,6 @@
 import TenantCleanlinessForm from "@/components/tenant/TenantCleanlinessForm";
 import TenantMaintenanceForm from "@/components/tenant/TenantMaintenanceForm";
+import MaintenanceMediaThumbs from "@/components/MaintenanceMediaThumbs";
 import { requireTenant } from "@/lib/auth";
 import { listMaintenanceRequests } from "@/lib/maintenance";
 import { formatInr } from "@/lib/receipts";
@@ -20,7 +21,7 @@ export default async function TenantMaintenancePage() {
       </h2>
       <p className="mt-2 text-slate-500">
         Raise repairs for flat {ctx?.flatNumber ?? "—"}, or report cleanliness
-        with photos if it is not being handled.
+        with photos or a short video if it is not being handled.
       </p>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
@@ -45,18 +46,7 @@ export default async function TenantMaintenancePage() {
                     {row.cost != null ? ` · ${formatInr(row.cost)}` : ""}
                   </p>
                   {row.photoUrls.length > 0 ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {row.photoUrls.map((url) => (
-                        // Signed storage URL; not a configured next/image host.
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          key={url}
-                          src={url}
-                          alt=""
-                          className="h-20 w-20 rounded-lg border border-slate-200 object-cover"
-                        />
-                      ))}
-                    </div>
+                    <MaintenanceMediaThumbs urls={row.photoUrls} />
                   ) : null}
                 </li>
               ))}

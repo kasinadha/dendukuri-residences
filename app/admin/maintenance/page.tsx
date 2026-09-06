@@ -25,7 +25,7 @@ export default async function MaintenancePage() {
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
           Create repair requests with building, flat, cost, and who paid.
-          Tenant cleanliness reports include photos.
+          Tenant cleanliness reports include photos or short videos.
         </p>
       </div>
 

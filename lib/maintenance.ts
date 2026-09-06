@@ -3,12 +3,16 @@ import { isMissingColumnError } from "@/lib/money";
 import {
   createSignedStorageUrl,
   extForMime,
+  isVideoMime,
+  MAX_MAINTENANCE_MEDIA,
+  MAX_MAINTENANCE_VIDEOS,
+  mimeOfFile,
   uploadStorageObject,
-  validateImageFile,
+  validateMaintenanceMediaFile,
 } from "@/lib/storage-uploads";
 
 export const MAINTENANCE_PHOTOS_BUCKET = "maintenance-photos";
-export const MAX_MAINTENANCE_PHOTOS = 4;
+export const MAX_MAINTENANCE_PHOTOS = MAX_MAINTENANCE_MEDIA;
 
 export type MaintenanceRequest = {
   id: string;
@@ -44,16 +48,26 @@ export async function uploadMaintenancePhotos(
   supabase: SupabaseClient,
   input: { userId: string; files: File[] }
 ): Promise<{ ok: true; paths: string[] } | { ok: false; error: string }> {
-  if (input.files.length > MAX_MAINTENANCE_PHOTOS) {
+  if (input.files.length > MAX_MAINTENANCE_MEDIA) {
     return {
       ok: false,
-      error: `Upload up to ${MAX_MAINTENANCE_PHOTOS} photos.`,
+      error: `Upload up to ${MAX_MAINTENANCE_MEDIA} photos or videos.`,
+    };
+  }
+
+  const videoCount = input.files.filter((file) =>
+    isVideoMime(mimeOfFile(file))
+  ).length;
+  if (videoCount > MAX_MAINTENANCE_VIDEOS) {
+    return {
+      ok: false,
+      error: `Upload up to ${MAX_MAINTENANCE_VIDEOS} videos.`,
     };
   }
 
   const paths: string[] = [];
   for (const [index, file] of input.files.entries()) {
-    const validated = validateImageFile(file, false);
+    const validated = validateMaintenanceMediaFile(file, false);
     if (!validated.ok) return validated;
     if (!validated.file || !validated.mime) continue;
     const ext = extForMime(validated.mime);
@@ -65,7 +79,7 @@ export async function uploadMaintenancePhotos(
       contentType: validated.mime,
       upsert: false,
       missingHint:
-        "Photo storage is not set up. Ask the owner to run supabase/migrations/20260910_uploads_documents_cleanliness.sql in Supabase.",
+        "Photo/video storage is not set up. Ask the owner to run supabase/migrations/20260910_uploads_documents_cleanliness.sql and 20260911_maintenance_videos.sql in Supabase.",
     });
     if (!uploaded.ok) return uploaded;
     paths.push(uploaded.path);
@@ -231,7 +245,7 @@ export async function createMaintenanceRequest(
       return {
         ok: false,
         error:
-          "Photo storage is not set up. Ask the owner to run supabase/migrations/20260910_uploads_documents_cleanliness.sql in Supabase.",
+          "Photo/video storage is not set up. Ask the owner to run supabase/migrations/20260910_uploads_documents_cleanliness.sql and 20260911_maintenance_videos.sql in Supabase.",
       };
     }
     delete payload.photo_paths;

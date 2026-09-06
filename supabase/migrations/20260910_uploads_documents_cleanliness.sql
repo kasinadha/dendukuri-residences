@@ -296,15 +296,25 @@ alter table public.maintenance_requests
   add column if not exists photo_paths text[] not null default '{}';
 
 comment on column public.maintenance_requests.photo_paths is
-  'Storage object paths in bucket maintenance-photos.';
+  'Storage object paths in bucket maintenance-photos (photos and short videos).';
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'maintenance-photos',
   'maintenance-photos',
   false,
-  5242880,
-  array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+  26214400,
+  array[
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/heic',
+    'image/heif',
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    'video/3gpp'
+  ]
 )
 on conflict (id) do update
 set

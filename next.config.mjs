@@ -7,8 +7,8 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      // Payment proofs, QR images, KYC docs, and up to 4 cleanliness photos.
-      bodySizeLimit: "24mb",
+      // Payment proofs, QR/KYC, and maintenance media (photos + short videos).
+      bodySizeLimit: "64mb",
     },
   },
 };

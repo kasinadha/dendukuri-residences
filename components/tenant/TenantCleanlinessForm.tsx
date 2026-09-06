@@ -4,6 +4,13 @@ import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { tenantCreateMaintenance } from "@/app/tenant/actions";
 import { formatActionError } from "@/lib/format-action-error";
+import {
+  isVideoMime,
+  MAINTENANCE_MEDIA_ACCEPT,
+  MAX_MAINTENANCE_MEDIA,
+  MAX_MAINTENANCE_VIDEOS,
+  mimeOfFile,
+} from "@/lib/storage-uploads";
 
 export default function TenantCleanlinessForm() {
   const router = useRouter();
@@ -17,11 +24,16 @@ export default function TenantCleanlinessForm() {
     setSuccess("");
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const photoCount = formData.getAll("photos").filter(
-      (item) => item instanceof File && item.size > 0
-    ).length;
-    if (photoCount > 4) {
-      setError("Upload up to 4 photos.");
+    const files = formData
+      .getAll("photos")
+      .filter((item): item is File => item instanceof File && item.size > 0);
+    if (files.length > MAX_MAINTENANCE_MEDIA) {
+      setError(`Upload up to ${MAX_MAINTENANCE_MEDIA} photos or videos.`);
+      return;
+    }
+    const videoCount = files.filter((file) => isVideoMime(mimeOfFile(file))).length;
+    if (videoCount > MAX_MAINTENANCE_VIDEOS) {
+      setError(`Upload up to ${MAX_MAINTENANCE_VIDEOS} videos.`);
       return;
     }
     startTransition(async () => {
@@ -31,7 +43,7 @@ export default function TenantCleanlinessForm() {
           setError(result.error);
           return;
         }
-        setSuccess("Cleanliness report submitted with photos.");
+        setSuccess("Cleanliness report submitted with media.");
         form.reset();
         router.refresh();
       } catch (err) {
@@ -49,8 +61,8 @@ export default function TenantCleanlinessForm() {
         Report a cleanliness issue
       </h3>
       <p className="mt-1 text-sm text-slate-600">
-        Use this when common areas or the flat are not being cleaned. Photos are
-        required so the owner can follow up.
+        Use this when common areas or the flat are not being cleaned. A photo
+        or short video is required so the owner can follow up.
       </p>
       <input type="hidden" name="category" value="cleanliness" />
       <input type="hidden" name="priority" value="high" />
@@ -79,18 +91,19 @@ export default function TenantCleanlinessForm() {
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Photos
+            Photos or videos
           </span>
           <input
             name="photos"
             type="file"
             required
             multiple
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            accept={MAINTENANCE_MEDIA_ACCEPT}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
           />
           <span className="mt-1 block text-xs text-slate-500">
-            Up to 4 photos, 5 MB each.
+            Up to {MAX_MAINTENANCE_MEDIA} files. Photos 5 MB each. Videos MP4 /
+            MOV / WebM, 25 MB each, max {MAX_MAINTENANCE_VIDEOS}.
           </span>
         </label>
       </div>
@@ -109,7 +122,7 @@ export default function TenantCleanlinessForm() {
         disabled={pending}
         className="mt-6 rounded-xl bg-amber-800 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
       >
-        {pending ? "Submitting…" : "Submit with photos"}
+        {pending ? "Submitting…" : "Submit with photos or video"}
       </button>
     </form>
   );

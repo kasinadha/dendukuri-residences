@@ -265,11 +265,11 @@ export const tenantFaqSections: TenantFaqSection[] = [
         id: "cleanliness",
         question: "How do I report a cleanliness issue?",
         answer:
-          "Menu → Maintenance → Report a cleanliness issue. Add where it is and upload photos. Use this when cleaning is not being handled.",
+          "Menu → Maintenance → Report a cleanliness issue. Add where it is and upload photos or a short video. Use this when cleaning is not being handled.",
         steps: [
           { title: "Open Maintenance", detail: "Find Report a cleanliness issue" },
-          { title: "Add photos", detail: "At least one photo is required" },
-          { title: "Submit", detail: "The owner sees the pictures on Admin → Maintenance" },
+          { title: "Add photos or video", detail: "At least one photo or short video is required" },
+          { title: "Submit", detail: "The owner sees the media on Admin → Maintenance" },
         ],
       },
     ],

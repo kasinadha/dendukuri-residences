@@ -7,6 +7,7 @@ import {
   updateMaintenanceStatusAction,
 } from "@/app/admin/maintenance/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
+import MaintenanceMediaThumbs from "@/components/MaintenanceMediaThumbs";
 import {
   filterFlatsByBuilding,
   type FlatLocationOption,
@@ -254,24 +255,7 @@ export default function MaintenancePanel({
                       </p>
                     ) : null}
                     {row.photoUrls.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {row.photoUrls.map((url) => (
-                          <a
-                            key={url}
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {/* Signed storage URL; not a configured next/image host. */}
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={url}
-                              alt=""
-                              className="h-20 w-20 rounded-lg border border-slate-200 object-cover"
-                            />
-                          </a>
-                        ))}
-                      </div>
+                      <MaintenanceMediaThumbs urls={row.photoUrls} />
                     ) : null}
                   </div>
                   <div className="flex flex-col gap-2 sm:items-end">

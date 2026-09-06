@@ -16,6 +16,29 @@ export const DOCUMENT_MIME_TYPES = new Set([
   "application/pdf",
 ]);
 
+export const VIDEO_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/3gpp",
+]);
+
+export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+export const MAX_MAINTENANCE_MEDIA = 4;
+export const MAX_MAINTENANCE_VIDEOS = 2;
+
+export const MAINTENANCE_MEDIA_ACCEPT =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,video/3gpp,.mp4,.mov,.m4v,.webm,.3gp";
+
+export function isVideoMime(mime: string): boolean {
+  return VIDEO_MIME_TYPES.has(mime.trim().toLowerCase());
+}
+
+export function isVideoSrc(src: string): boolean {
+  const path = src.split("?")[0].toLowerCase();
+  return /\.(mp4|m4v|mov|webm|3gp)$/.test(path);
+}
+
 export function extForMime(mime: string): string {
   switch (mime) {
     case "image/png":
@@ -28,6 +51,14 @@ export function extForMime(mime: string): string {
       return "heif";
     case "application/pdf":
       return "pdf";
+    case "video/webm":
+      return "webm";
+    case "video/quicktime":
+      return "mov";
+    case "video/3gpp":
+      return "3gp";
+    case "video/mp4":
+      return "mp4";
     default:
       return "jpg";
   }
@@ -43,6 +74,10 @@ export function mimeOfFile(file: File): string {
   if (name.endsWith(".heif")) return "image/heif";
   if (name.endsWith(".pdf")) return "application/pdf";
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".mp4") || name.endsWith(".m4v")) return "video/mp4";
+  if (name.endsWith(".mov")) return "video/quicktime";
+  if (name.endsWith(".webm")) return "video/webm";
+  if (name.endsWith(".3gp")) return "video/3gpp";
   return typed;
 }
 
@@ -87,6 +122,32 @@ export function validateImageFile(
     maxBytes: MAX_IMAGE_BYTES,
     emptyOk,
     imageLabel: "Upload a JPEG, PNG, WebP, or HEIC image.",
+  });
+}
+
+export function validateMaintenanceMediaFile(
+  file: File | null | undefined,
+  emptyOk = false
+) {
+  if (!file || file.size === 0) {
+    if (emptyOk) return { ok: true as const, file: null, mime: null };
+    return { ok: false as const, error: "Choose a photo or video to upload." };
+  }
+  const mime = mimeOfFile(file);
+  if (isVideoMime(mime)) {
+    return validateUploadFile(file, {
+      allowed: VIDEO_MIME_TYPES,
+      maxBytes: MAX_VIDEO_BYTES,
+      emptyOk,
+      imageLabel: "Video must be MP4, MOV, or WebM, up to 25 MB.",
+    });
+  }
+  return validateUploadFile(file, {
+    allowed: IMAGE_MIME_TYPES,
+    maxBytes: MAX_IMAGE_BYTES,
+    emptyOk,
+    imageLabel:
+      "Upload a JPEG, PNG, WebP, or HEIC photo, or an MP4 / MOV / WebM video.",
   });
 }
 
