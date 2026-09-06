@@ -12,6 +12,7 @@ const nav = [
   { href: "/tenant/cameras", label: "Cameras" },
   { href: "/tenant/electricity", label: "Electricity" },
   { href: "/tenant/maintenance", label: "Maintenance" },
+  { href: "/tenant/documents", label: "Documents" },
   { href: "/tenant/agreement", label: "Agreement" },
   { href: "/tenant/vacate", label: "Move / transfer" },
   { href: "/help", label: "Help" },

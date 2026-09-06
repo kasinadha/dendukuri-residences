@@ -3,6 +3,7 @@
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updatePaymentAccountAction, ensurePaymentAccountsAction } from "@/app/admin/accounts/actions";
+import QrImageFields from "@/components/admin/QrImageFields";
 import type { PaymentAccount } from "@/lib/payment-accounts";
 
 export default function PaymentAccountsPanel({
@@ -136,17 +137,12 @@ export default function PaymentAccountsPanel({
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-slate-700">
-                  QR image URL
-                </span>
-                <input
-                  name="upi_qr_url"
-                  defaultValue={account.upiQrUrl ?? ""}
-                  placeholder="/upi/default-receive-qr.png"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+              <div className="grid gap-4 lg:col-span-2 sm:grid-cols-2">
+                <QrImageFields
+                  defaultUrl={account.upiQrUrl}
+                  urlPlaceholder="/upi/default-receive-qr.png"
                 />
-              </label>
+              </div>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">
                   Default for building

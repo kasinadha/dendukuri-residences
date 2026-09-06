@@ -261,6 +261,35 @@ export const tenantFaqSections: TenantFaqSection[] = [
         ],
         tips: ["For emergencies (major leak, no power), call the owner directly too."],
       },
+      {
+        id: "cleanliness",
+        question: "How do I report a cleanliness issue?",
+        answer:
+          "Menu → Maintenance → Report a cleanliness issue. Add where it is and upload photos. Use this when cleaning is not being handled.",
+        steps: [
+          { title: "Open Maintenance", detail: "Find Report a cleanliness issue" },
+          { title: "Add photos", detail: "At least one photo is required" },
+          { title: "Submit", detail: "The owner sees the pictures on Admin → Maintenance" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "documents",
+    title: "Documents",
+    description: "Share ID and employment proof with the owner.",
+    items: [
+      {
+        id: "upload-kyc",
+        question: "Where do I upload Aadhaar, PAN, or employment proof?",
+        answer:
+          "Menu → Documents. Upload a government ID (Aadhaar or PAN) and current employment proof. Only you and the owner can view these files.",
+        steps: [
+          { title: "Choose ID type", detail: "Aadhaar, PAN, or other" },
+          { title: "Upload the file", detail: "Photo or PDF, up to 8 MB" },
+          { title: "Employment proof", detail: "Offer letter, ID card, or payslip" },
+        ],
+      },
     ],
   },
   {

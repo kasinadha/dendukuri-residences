@@ -9,6 +9,7 @@ import {
   updateFlatUpiMapping,
   updateFlatUpiMappingForWing,
 } from "@/lib/flats";
+import { resolveQrUrlFromForm } from "@/lib/upi-qr-upload";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -33,11 +34,19 @@ function revalidateAccountPaths() {
 export async function updatePaymentAccountAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   try {
+    const id = asString(formData, "id");
+    const qr = await resolveQrUrlFromForm(supabase, formData, {
+      fileKey: "upi_qr_file",
+      urlKey: "upi_qr_url",
+      objectKey: `accounts/${id || "account"}`,
+    });
+    if (!qr.ok) return qr;
+
     const result = await updatePaymentAccount(supabase, {
-      id: asString(formData, "id"),
+      id,
       label: asString(formData, "label"),
       upiId: asString(formData, "upi_id") || null,
-      upiQrUrl: asString(formData, "upi_qr_url") || null,
+      upiQrUrl: qr.url,
       buildingWing: asBuildingWing(asString(formData, "building_wing")),
       notes: asString(formData, "notes") || null,
     });
@@ -69,10 +78,18 @@ export async function ensurePaymentAccountsAction() {
 export async function updateFlatUpiMappingAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   try {
+    const flatId = asString(formData, "flat_id");
+    const qr = await resolveQrUrlFromForm(supabase, formData, {
+      fileKey: "upi_qr_file",
+      urlKey: "upi_qr_url",
+      objectKey: `flats/${flatId || "flat"}`,
+    });
+    if (!qr.ok) return qr;
+
     const result = await updateFlatUpiMapping(supabase, {
-      flatId: asString(formData, "flat_id"),
+      flatId,
       upiId: asString(formData, "upi_id") || null,
-      upiQrUrl: asString(formData, "upi_qr_url") || null,
+      upiQrUrl: qr.url,
       paymentAccountId: asString(formData, "payment_account_id") || null,
     });
     if (result.ok) revalidateAccountPaths();
@@ -92,10 +109,17 @@ export async function updateFlatUpiMappingForWingAction(formData: FormData) {
     if (wingRaw !== "C" && wingRaw !== "D") {
       return { ok: false as const, error: "Choose Building C or D." };
     }
+    const qr = await resolveQrUrlFromForm(supabase, formData, {
+      fileKey: "upi_qr_file",
+      urlKey: "upi_qr_url",
+      objectKey: `wings/${wingRaw}`,
+    });
+    if (!qr.ok) return qr;
+
     const result = await updateFlatUpiMappingForWing(supabase, {
       wing: wingRaw,
       upiId: asString(formData, "upi_id") || null,
-      upiQrUrl: asString(formData, "upi_qr_url") || null,
+      upiQrUrl: qr.url,
       paymentAccountId: asString(formData, "payment_account_id") || null,
     });
     if (result.ok) revalidateAccountPaths();

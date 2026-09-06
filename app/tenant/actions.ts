@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { requireTenant } from "@/lib/auth";
 import { acceptTenancyAgreement } from "@/lib/agreements";
 import { getFlatPaymentDetails } from "@/lib/flats";
-import { createMaintenanceRequest } from "@/lib/maintenance";
+import { createMaintenanceRequest, uploadMaintenancePhotos } from "@/lib/maintenance";
+import {
+  parseDocumentKind,
+  parseGovernmentIdSubtype,
+  upsertTenantDocument,
+} from "@/lib/tenant-documents";
+import { asFormFile, asFormFiles } from "@/lib/storage-uploads";
 import { createVacateRequest } from "@/lib/ops";
 import {
   uploadPaymentProof,
@@ -155,13 +161,38 @@ export async function tenantCreateMaintenance(formData: FormData) {
       return { ok: false as const, error: "No flat linked to your account." };
     }
 
+    const category = asString(formData, "category") || "general";
+    const isCleanliness = category === "cleanliness";
+    const photos = asFormFiles(formData, "photos");
+    if (isCleanliness && photos.length === 0) {
+      return {
+        ok: false as const,
+        error: "Upload at least one photo of the cleanliness issue.",
+      };
+    }
+
+    let photoPaths: string[] = [];
+    if (photos.length > 0) {
+      const uploaded = await uploadMaintenancePhotos(supabase, {
+        userId: user.id,
+        files: photos,
+      });
+      if (!uploaded.ok) return { ok: false as const, error: uploaded.error };
+      photoPaths = uploaded.paths;
+    }
+
+    const title = isCleanliness
+      ? asString(formData, "title") || "Cleanliness issue"
+      : asString(formData, "title");
+
     const result = await createMaintenanceRequest(supabase, {
       flatId: ctx.flatId,
-      title: asString(formData, "title"),
+      title,
       description: asString(formData, "description") || null,
       status: "open",
-      priority: asString(formData, "priority") || "normal",
-      category: asString(formData, "category") || "general",
+      priority: asString(formData, "priority") || (isCleanliness ? "high" : "normal"),
+      category,
+      photoPaths,
     });
 
     if (result.ok) {
@@ -174,6 +205,58 @@ export async function tenantCreateMaintenance(formData: FormData) {
     return {
       ok: false as const,
       error: formatActionError(error, "Could not submit the request. Try again."),
+    };
+  }
+}
+
+export async function tenantUploadDocumentAction(formData: FormData) {
+  const { supabase, user } = await requireTenant();
+  try {
+    const ctx = await getTenantPortalContext(supabase, user.id);
+    if (!ctx?.tenantId) {
+      return { ok: false as const, error: "No tenant profile on your account." };
+    }
+
+    const kind = parseDocumentKind(asString(formData, "kind"));
+    if (!kind) {
+      return { ok: false as const, error: "Choose Government ID or employment proof." };
+    }
+
+    const file = asFormFile(formData, "file");
+    if (!file) {
+      return { ok: false as const, error: "Choose a file to upload." };
+    }
+
+    const idSubtype =
+      kind === "government_id"
+        ? parseGovernmentIdSubtype(asString(formData, "id_subtype"))
+        : null;
+    if (kind === "government_id" && !idSubtype) {
+      return {
+        ok: false as const,
+        error: "Choose Aadhaar, PAN, or other ID type.",
+      };
+    }
+
+    const result = await upsertTenantDocument(supabase, {
+      tenantId: ctx.tenantId,
+      profileId: user.id,
+      kind,
+      idSubtype,
+      file,
+      uploadedBy: user.id,
+    });
+
+    if (result.ok) {
+      revalidatePath("/tenant");
+      revalidatePath("/tenant/documents");
+      revalidatePath("/admin/tenants");
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: formatActionError(error, "Could not upload the document. Try again."),
     };
   }
 }

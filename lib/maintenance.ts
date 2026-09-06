@@ -1,4 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isMissingColumnError } from "@/lib/money";
+import {
+  createSignedStorageUrl,
+  extForMime,
+  uploadStorageObject,
+  validateImageFile,
+} from "@/lib/storage-uploads";
+
+export const MAINTENANCE_PHOTOS_BUCKET = "maintenance-photos";
+export const MAX_MAINTENANCE_PHOTOS = 4;
 
 export type MaintenanceRequest = {
   id: string;
@@ -13,6 +23,8 @@ export type MaintenanceRequest = {
   payerAccountId: string | null;
   payerAccountLabel: string | null;
   createdAt: string;
+  photoPaths: string[];
+  photoUrls: string[];
 };
 
 function num(value: unknown): number | null {
@@ -21,11 +33,63 @@ function num(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+export async function uploadMaintenancePhotos(
+  supabase: SupabaseClient,
+  input: { userId: string; files: File[] }
+): Promise<{ ok: true; paths: string[] } | { ok: false; error: string }> {
+  if (input.files.length > MAX_MAINTENANCE_PHOTOS) {
+    return {
+      ok: false,
+      error: `Upload up to ${MAX_MAINTENANCE_PHOTOS} photos.`,
+    };
+  }
+
+  const paths: string[] = [];
+  for (const [index, file] of input.files.entries()) {
+    const validated = validateImageFile(file, false);
+    if (!validated.ok) return validated;
+    if (!validated.file || !validated.mime) continue;
+    const ext = extForMime(validated.mime);
+    const path = `${input.userId}/${Date.now()}-${index}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+    const uploaded = await uploadStorageObject(supabase, {
+      bucket: MAINTENANCE_PHOTOS_BUCKET,
+      path,
+      file: validated.file,
+      contentType: validated.mime,
+      upsert: false,
+      missingHint:
+        "Photo storage is not set up. Ask the owner to run supabase/migrations/20260910_uploads_documents_cleanliness.sql in Supabase.",
+    });
+    if (!uploaded.ok) return uploaded;
+    paths.push(uploaded.path);
+  }
+  return { ok: true, paths };
+}
+
+async function signPhotoPaths(
+  supabase: SupabaseClient,
+  paths: string[]
+): Promise<string[]> {
+  const urls = await Promise.all(
+    paths.map((path) =>
+      createSignedStorageUrl(supabase, MAINTENANCE_PHOTOS_BUCKET, path)
+    )
+  );
+  return urls.filter((url): url is string => Boolean(url));
+}
+
 export async function listMaintenanceRequests(
   supabase: SupabaseClient,
   options?: { flatId?: string; limit?: number }
 ): Promise<MaintenanceRequest[]> {
-  const columns = `
+  const base = `
       id,
       flat_id,
       title,
@@ -38,9 +102,9 @@ export async function listMaintenanceRequests(
       created_at,
       flats ( flat_number )
   `;
-  const withPayer = `${columns},
-      payment_accounts ( label )
-  `;
+  const withPhotos = `${base}, photo_paths`;
+  const withPayer = `${withPhotos}, payment_accounts ( label )`;
+  const withPayerNoPhotos = `${base}, payment_accounts ( label )`;
 
   async function run(select: string) {
     let query = supabase
@@ -56,14 +120,19 @@ export async function listMaintenanceRequests(
   }
 
   let { data, error } = await run(withPayer);
+  if (error && (isMissingColumnError(error.message) || /photo_paths/i.test(error.message))) {
+    const retry = await run(withPayerNoPhotos);
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) {
-    const retry = await run(columns);
+    const retry = await run(base);
     data = retry.data;
     error = retry.error;
   }
   if (error || !data) return [];
 
-  return data.map((row) => {
+  const mapped = data.map((row) => {
     const rec = row as unknown as {
       id: string;
       flat_id: string;
@@ -75,6 +144,7 @@ export async function listMaintenanceRequests(
       category: string | null;
       payer_account_id: string | null;
       created_at: string;
+      photo_paths?: unknown;
       flats?: { flat_number?: string } | { flat_number?: string }[] | null;
       payment_accounts?: { label?: string } | { label?: string }[] | null;
     };
@@ -95,8 +165,17 @@ export async function listMaintenanceRequests(
       payerAccountId: rec.payer_account_id,
       payerAccountLabel: payerAccount?.label?.trim() || null,
       createdAt: rec.created_at,
+      photoPaths: asStringArray(rec.photo_paths),
+      photoUrls: [] as string[],
     };
   });
+
+  return Promise.all(
+    mapped.map(async (row) => ({
+      ...row,
+      photoUrls: await signPhotoPaths(supabase, row.photoPaths),
+    }))
+  );
 }
 
 export async function createMaintenanceRequest(
@@ -110,6 +189,7 @@ export async function createMaintenanceRequest(
     cost?: number | null;
     category?: string | null;
     payerAccountId?: string | null;
+    photoPaths?: string[];
   }
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.flatId) return { ok: false, error: "Select a flat." };
@@ -133,12 +213,36 @@ export async function createMaintenanceRequest(
   if (input.payerAccountId !== undefined) {
     payload.payer_account_id = input.payerAccountId?.trim() || null;
   }
+  if (input.photoPaths && input.photoPaths.length > 0) {
+    payload.photo_paths = input.photoPaths;
+  }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("maintenance_requests")
     .insert(payload)
     .select("id")
     .maybeSingle();
+
+  if (
+    error &&
+    (isMissingColumnError(error.message) || /photo_paths/i.test(error.message))
+  ) {
+    if (input.photoPaths && input.photoPaths.length > 0) {
+      return {
+        ok: false,
+        error:
+          "Photo storage is not set up. Ask the owner to run supabase/migrations/20260910_uploads_documents_cleanliness.sql in Supabase.",
+      };
+    }
+    delete payload.photo_paths;
+    const retry = await supabase
+      .from("maintenance_requests")
+      .insert(payload)
+      .select("id")
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error || !data) {
     return { ok: false, error: error?.message ?? "Could not create request." };

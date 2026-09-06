@@ -19,6 +19,7 @@ function MockupChrome({ children }: { children: ReactNode }) {
         <span className="rounded-lg px-2 py-1">Cameras</span>
         <span className="rounded-lg px-2 py-1">Electricity</span>
         <span className="rounded-lg px-2 py-1">Maintenance</span>
+        <span className="rounded-lg px-2 py-1">Documents</span>
         <span className="rounded-lg px-2 py-1">Move</span>
       </div>
       {children}

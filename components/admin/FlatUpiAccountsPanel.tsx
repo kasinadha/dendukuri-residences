@@ -7,6 +7,7 @@ import {
   updateFlatUpiMappingForWingAction,
 } from "@/app/admin/accounts/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
+import QrImageFields from "@/components/admin/QrImageFields";
 import {
   buildingWingFromFlatNumber,
   buildingWingLabel,
@@ -73,16 +74,9 @@ function WingGroup({
               className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
             />
           </label>
-          <label className="block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              QR image URL
-            </span>
-            <input
-              name="upi_qr_url"
-              placeholder="/upi/building-qr.png"
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
-            />
-          </label>
+          <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+            <QrImageFields urlPlaceholder="/upi/building-qr.png" />
+          </div>
           <AccountSelectField
             name="payment_account_id"
             accounts={accounts}
@@ -137,17 +131,12 @@ function WingGroup({
                       className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                     />
                   </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">
-                      QR image URL
-                    </span>
-                    <input
-                      name="upi_qr_url"
-                      defaultValue={flat.upiQrUrl ?? ""}
-                      placeholder="/upi/c201-qr.png"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+                  <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
+                    <QrImageFields
+                      defaultUrl={flat.upiQrUrl}
+                      urlPlaceholder="/upi/c201-qr.png"
                     />
-                  </label>
+                  </div>
                   <div className="sm:col-span-2">
                     <AccountSelectField
                       name="payment_account_id"
@@ -248,8 +237,15 @@ export default function FlatUpiAccountsPanel({
     const formData = new FormData(form);
     const upi = String(formData.get("upi_id") ?? "").trim();
     const qr = String(formData.get("upi_qr_url") ?? "").trim();
-    if (!upi && !qr && !String(formData.get("payment_account_id") ?? "").trim()) {
-      setError("Enter a UPI ID, QR URL, or account before applying to the building.");
+    const qrFile = formData.get("upi_qr_file");
+    const hasQrFile = qrFile instanceof File && qrFile.size > 0;
+    if (
+      !upi &&
+      !qr &&
+      !hasQrFile &&
+      !String(formData.get("payment_account_id") ?? "").trim()
+    ) {
+      setError("Enter a UPI ID, QR image, or account before applying to the building.");
       return;
     }
     if (
@@ -286,9 +282,9 @@ export default function FlatUpiAccountsPanel({
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
         <h3 className="text-lg font-bold text-slate-900">Per-flat UPI & QR</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Set a receive UPI ID and QR for each flat. Tenants and the public pay
-          page use the flat’s details first, then the Joint account. You can
-          also push the same UPI/QR to every flat in Building C or D.
+          Set a receive UPI ID and QR for each flat. Upload a QR image or paste
+          a URL. Tenants and the public pay page use the flat first, then Joint.
+          You can also push the same UPI/QR to every Building C or D flat.
         </p>
       </div>
 

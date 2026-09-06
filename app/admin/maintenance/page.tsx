@@ -25,6 +25,7 @@ export default async function MaintenancePage() {
         </h2>
         <p className="mt-2 max-w-2xl text-slate-500">
           Create repair requests with building, flat, cost, and who paid.
+          Tenant cleanliness reports include photos.
         </p>
       </div>
 
@@ -44,6 +45,7 @@ export default async function MaintenancePage() {
           costLabel: row.cost != null ? formatInr(row.cost) : "—",
           category: row.category,
           payerLabel: row.payerAccountLabel,
+          photoUrls: row.photoUrls,
         }))}
       />
     </AdminLayout>

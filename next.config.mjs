@@ -7,8 +7,8 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      // Public pay / tenant pay may attach screenshots up to 5 MB.
-      bodySizeLimit: "6mb",
+      // Payment proofs, QR images, KYC docs, and up to 4 cleanliness photos.
+      bodySizeLimit: "24mb",
     },
   },
 };

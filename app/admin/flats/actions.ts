@@ -19,6 +19,7 @@ import {
   type EnsureD201Result,
 } from "@/lib/tenancies";
 import { updateTenancyReview } from "@/lib/tenancy-review";
+import { resolveQrUrlFromForm } from "@/lib/upi-qr-upload";
 
 function asString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -99,6 +100,12 @@ export async function updateFlatAction(
   clearFlatSchemaCache();
   const property = await ensureDendukuriProperty(supabase);
   const id = asString(formData, "id");
+  const qr = await resolveQrUrlFromForm(supabase, formData, {
+    fileKey: "upi_qr_file",
+    urlKey: "upi_qr_url",
+    objectKey: `flats/${id || "flat"}`,
+  });
+  if (!qr.ok) return qr;
 
   const result = await updateFlat(supabase, id, {
     flatNumber: asString(formData, "flat_number"),
@@ -110,7 +117,7 @@ export async function updateFlatAction(
     maintenanceAmount: asOptionalNumber(formData, "maintenance_amount"),
     notes: asString(formData, "notes") || null,
     upiId: asString(formData, "upi_id") || null,
-    upiQrUrl: asString(formData, "upi_qr_url") || null,
+    upiQrUrl: qr.url,
     property,
   });
 

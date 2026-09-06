@@ -8,6 +8,7 @@ import {
   IndianRupee,
   ScrollText,
   Cctv,
+  IdCard,
 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
@@ -166,7 +167,13 @@ export default async function TenantHomePage() {
             href: "/tenant/maintenance",
             icon: Wrench,
             title: "Maintenance",
-            detail: "Raise or track repair requests",
+            detail: "Repairs, or cleanliness with photos",
+          },
+          {
+            href: "/tenant/documents",
+            icon: IdCard,
+            title: "Documents",
+            detail: "Aadhaar / PAN and employment proof",
           },
           {
             href: "/tenant/agreement",

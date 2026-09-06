@@ -6,6 +6,7 @@ import {
   createFlatAction,
   updateFlatAction,
 } from "@/app/admin/flats/actions";
+import QrImageFields from "@/components/admin/QrImageFields";
 import type { FlatListItem } from "@/lib/flats";
 
 type Props = {
@@ -201,22 +202,16 @@ export default function FlatEditorForm({ flat, onCancelEdit }: Props) {
           </span>
         </label>
 
-        <label className="block sm:col-span-2">
-          <span className="mb-2 block text-sm font-semibold text-slate-700">
-            QR image URL (optional)
-          </span>
-          <input
-            name="upi_qr_url"
-            defaultValue={flat?.upiQrUrl ?? ""}
-            placeholder="/upi/default-receive-qr.png"
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+        <div className="sm:col-span-2 grid gap-4 sm:grid-cols-2">
+          <QrImageFields
+            defaultUrl={flat?.upiQrUrl}
+            urlPlaceholder="/upi/default-receive-qr.png"
           />
-          <span className="mt-1 block text-xs text-slate-500">
-            Path or URL to the receive QR. Example bundled image:{" "}
-            <code>/upi/default-receive-qr.png</code>. If empty, a QR is
-            generated from the UPI ID.
-          </span>
-        </label>
+        </div>
+        <p className="sm:col-span-2 text-xs text-slate-500">
+          Upload a receive QR, or paste a path/URL. If both are empty, a QR is
+          generated from the UPI ID.
+        </p>
 
         <label className="block sm:col-span-2">
           <span className="mb-2 block text-sm font-semibold text-slate-700">

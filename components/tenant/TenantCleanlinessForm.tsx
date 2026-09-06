@@ -3,8 +3,9 @@
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { tenantCreateMaintenance } from "@/app/tenant/actions";
+import { formatActionError } from "@/lib/format-action-error";
 
-export default function TenantMaintenanceForm() {
+export default function TenantCleanlinessForm() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -24,80 +25,73 @@ export default function TenantMaintenanceForm() {
       return;
     }
     startTransition(async () => {
-      const result = await tenantCreateMaintenance(formData);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await tenantCreateMaintenance(formData);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSuccess("Cleanliness report submitted with photos.");
+        form.reset();
+        router.refresh();
+      } catch (err) {
+        setError(formatActionError(err, "Could not submit the report."));
       }
-      setSuccess("Request submitted.");
-      form.reset();
-      router.refresh();
     });
   }
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+      className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5 shadow-sm sm:p-6"
     >
-      <h3 className="text-lg font-bold text-slate-900">Raise a request</h3>
+      <h3 className="text-lg font-bold text-slate-900">
+        Report a cleanliness issue
+      </h3>
+      <p className="mt-1 text-sm text-slate-600">
+        Use this when common areas or the flat are not being cleaned. Photos are
+        required so the owner can follow up.
+      </p>
+      <input type="hidden" name="category" value="cleanliness" />
+      <input type="hidden" name="priority" value="high" />
       <div className="mt-6 grid gap-4">
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Title
+            Where / what
           </span>
           <input
             name="title"
             required
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+            placeholder="e.g. Staircase, parking, corridor"
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
           />
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Priority
-          </span>
-          <select
-            name="priority"
-            defaultValue="normal"
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-          >
-            <option value="low">Low</option>
-            <option value="normal">Normal</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Category
-          </span>
-          <input
-            name="category"
-            placeholder="plumbing / electrical"
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Description
+            Details
           </span>
           <textarea
             name="description"
             rows={3}
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+            placeholder="What is not being handled, and since when."
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
           />
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Photos (optional)
+            Photos
           </span>
           <input
             name="photos"
             type="file"
+            required
             multiple
             accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Up to 4 photos, 5 MB each.
+          </span>
         </label>
       </div>
       {error ? (
@@ -113,9 +107,9 @@ export default function TenantMaintenanceForm() {
       <button
         type="submit"
         disabled={pending}
-        className="mt-6 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+        className="mt-6 rounded-xl bg-amber-800 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
       >
-        {pending ? "Submitting…" : "Submit request"}
+        {pending ? "Submitting…" : "Submit with photos"}
       </button>
     </form>
   );
