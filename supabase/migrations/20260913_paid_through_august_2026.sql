@@ -36,7 +36,7 @@ declare
   v_receipt_number text;
   v_suffix text;
   v_attempts int;
-  r record;
+  due_row record;
 begin
   v_has_billing_month := exists (
     select 1 from information_schema.columns
@@ -206,11 +206,11 @@ begin
              er.reading_date,
              er.created_at,
              coalesce(
-               r.billing_month,
+               ebr.billing_month,
                substring(er.notes from 'billing_month:([0-9]{4}-[0-9]{2})')
              ) as billing_month
       from public.electricity_readings er
-      left join public.electricity_billing_runs r on r.id = er.billing_run_id
+      left join public.electricity_billing_runs ebr on ebr.id = er.billing_run_id
     ) labeled
     where labeled.billing_month is not null
       and labeled.billing_month <= v_cutoff
@@ -321,7 +321,7 @@ begin
   where b.month_due > 0
     and greatest(0, b.month_due - coalesce(c.credited, 0)) > 0;
 
-  for r in
+  for due_row in
     select tenancy_id, flat_number, tenant_name, billing_month, month_due, credited, needed
     from tmp_due
     order by flat_number, billing_month
@@ -331,35 +331,35 @@ begin
         tenancy_id, payment_date, amount_paid, amount_due,
         payment_mode, payment_type, status, billing_month, notes
       ) values (
-        r.tenancy_id,
-        (r.billing_month || '-05')::date,
-        r.needed,
-        r.needed,
+        due_row.tenancy_id,
+        (due_row.billing_month || '-05')::date,
+        due_row.needed,
+        due_row.needed,
         'bank_transfer',
         'rent',
         'paid',
-        r.billing_month,
-        'billing_month:' || r.billing_month || E'\nPaid through August 2026 (owner confirmed).'
+        due_row.billing_month,
+        'billing_month:' || due_row.billing_month || E'\nPaid through August 2026 (owner confirmed).'
       ) returning id into v_payment_id;
     else
       insert into public.payments (
         tenancy_id, payment_date, amount_paid, amount_due,
         payment_mode, payment_type, status, notes
       ) values (
-        r.tenancy_id,
-        (r.billing_month || '-05')::date,
-        r.needed,
-        r.needed,
+        due_row.tenancy_id,
+        (due_row.billing_month || '-05')::date,
+        due_row.needed,
+        due_row.needed,
         'bank_transfer',
         'rent',
         'paid',
-        'billing_month:' || r.billing_month || E'\nPaid through August 2026 (owner confirmed).'
+        'billing_month:' || due_row.billing_month || E'\nPaid through August 2026 (owner confirmed).'
       ) returning id into v_payment_id;
     end if;
 
     if v_has_allocations then
       insert into public.payment_allocations (payment_id, billing_month, amount)
-      values (v_payment_id, r.billing_month, r.needed);
+      values (v_payment_id, due_row.billing_month, due_row.needed);
     end if;
 
     v_attempts := 0;
@@ -370,22 +370,22 @@ begin
           v_receipt_number := public.allocate_receipt_number();
         else
           v_suffix := upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
-          v_receipt_number := 'DR-' || replace(r.billing_month, '-', '') || '-' || v_suffix;
+          v_receipt_number := 'DR-' || replace(due_row.billing_month, '-', '') || '-' || v_suffix;
         end if;
         insert into public.receipts (payment_id, receipt_number)
         values (v_payment_id, v_receipt_number);
         exit;
       exception when unique_violation then
         if v_attempts >= 8 then
-          raise exception 'Could not allocate receipt for % %', r.flat_number, r.billing_month;
+          raise exception 'Could not allocate receipt for % %', due_row.flat_number, due_row.billing_month;
         end if;
       end;
     end loop;
 
     v_inserted := v_inserted + 1;
     raise notice 'Catch-up % % (%) ₹% (due ₹%, already credited ₹%) receipt %',
-      r.flat_number, r.billing_month, coalesce(r.tenant_name, '—'),
-      r.needed, r.month_due, r.credited, v_receipt_number;
+      due_row.flat_number, due_row.billing_month, coalesce(due_row.tenant_name, '—'),
+      due_row.needed, due_row.month_due, due_row.credited, v_receipt_number;
   end loop;
 
   raise notice 'Paid through Aug 2026: inserted % catch-up payment(s). September 2026+ unchanged.', v_inserted;
