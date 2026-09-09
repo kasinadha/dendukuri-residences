@@ -268,6 +268,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
             </h3>
             <p className="mt-1 text-sm text-slate-500">
               Active and vacated tenancies billed for the selected month.
+              Move-in month is not billed — first dues are the following month.
             </p>
           </div>
           {monthSummary.rows.length === 0 ? (

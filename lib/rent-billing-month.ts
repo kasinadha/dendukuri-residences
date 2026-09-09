@@ -1,3 +1,4 @@
+import { calendarMonthKeyFromValue } from "@/lib/calendar-date";
 import {
   tenancyOverlapsBillingMonth,
   type TenancyForBillingOverlap,
@@ -17,10 +18,8 @@ export function tenancyOwesMonthlyDues(
 ): boolean {
   if (!tenancyOverlapsBillingMonth(tenancy, billingMonthKey)) return false;
 
-  const startDate = tenancy.start_date?.trim();
-  if (!startDate) return false;
-
-  const startMonth = startDate.slice(0, 7);
+  const startMonth = calendarMonthKeyFromValue(tenancy.start_date);
+  if (!startMonth) return false;
   if (billingMonthKey <= startMonth) return false;
 
   return true;
@@ -45,8 +44,8 @@ export function tenancyIncludedInMonthlyLedger(
 export function firstMonthlyBillingMonthKey(
   startDate: string | null | undefined
 ): string | null {
-  const startMonth = startDate?.trim().slice(0, 7);
-  if (!startMonth || !/^\d{4}-\d{2}$/.test(startMonth)) return null;
+  const startMonth = calendarMonthKeyFromValue(startDate);
+  if (!startMonth) return null;
 
   const year = Number(startMonth.slice(0, 4));
   const month = Number(startMonth.slice(5, 7));

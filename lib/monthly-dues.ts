@@ -5,6 +5,7 @@ import {
 } from "@/lib/dues-breakdown";
 import { roundElectricityDue } from "@/lib/electricity-billing";
 import {
+  firstMonthlyBillingMonthKey,
   tenancyIncludedInMonthlyLedger,
   tenancyOwesMonthlyDues,
 } from "@/lib/rent-billing-month";
@@ -463,7 +464,7 @@ export async function getMonthlyDuesSummary(
     const chargesDue = owesDues ? charges.totalMonthlyCharges : 0;
     const electricityRaw = electricityByFlatId.get(flat?.id ?? "") ?? 0;
     const electricityCharge = owesDues ? electricityRaw : 0;
-    const finesCharge = finesByTenancy.get(row.id) ?? 0;
+    const finesCharge = owesDues ? finesByTenancy.get(row.id) ?? 0 : 0;
     const lines = buildMonthlyDuesLines({
       rentDue,
       maintenanceCharge,
@@ -519,7 +520,11 @@ export async function getMonthlyDuesSummary(
       lastPaymentDate: paidInfo?.lastPaymentDate ?? null,
     };
   })
-    .filter((row) => row.totalDue > 0 || row.amountPaid > 0);
+    .filter((row) => {
+      const firstDue = firstMonthlyBillingMonthKey(row.startDate);
+      if (firstDue && row.billingMonthKey < firstDue) return false;
+      return row.totalDue > 0 || row.amountPaid > 0;
+    });
 
   rows.sort((a, b) => a.flatNumber.localeCompare(b.flatNumber));
 
@@ -663,7 +668,7 @@ export async function getTenancyMonthlyDueRow(
   const chargesDue = owesDues ? charges.totalMonthlyCharges : 0;
   const electricityRaw = electricityByFlatId.get(flat?.id ?? "") ?? 0;
   const electricityCharge = owesDues ? electricityRaw : 0;
-  const finesCharge = finesByTenancy.get(tenancyId) ?? 0;
+  const finesCharge = owesDues ? finesByTenancy.get(tenancyId) ?? 0 : 0;
   const lines = buildMonthlyDuesLines({
     rentDue,
     maintenanceCharge,
