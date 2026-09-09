@@ -1,4 +1,6 @@
 -- C201 (Priyanshi / Priyakshi): May 2026 and June 2026 rent are fully paid.
+-- Superseded for the whole building by 20260913_paid_through_august_2026.sql
+-- (safe to skip this file if you run 20260913).
 -- The 5 Jun 2026 ₹10,000 receipt was saved as ₹10,000 of ₹20,000 (June plus
 -- May arrears). That leftover kept June overdue and rolled ₹10,000 into later
 -- months. Owner confirmed both months are paid.
