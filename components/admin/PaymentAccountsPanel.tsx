@@ -3,6 +3,7 @@
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updatePaymentAccountAction, ensurePaymentAccountsAction } from "@/app/admin/accounts/actions";
+import QrImageFields from "@/components/admin/QrImageFields";
 import type { PaymentAccount } from "@/lib/payment-accounts";
 
 export default function PaymentAccountsPanel({
@@ -45,9 +46,10 @@ export default function PaymentAccountsPanel({
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
         <h3 className="text-lg font-bold text-slate-900">Payment accounts</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Map each UPI ID or QR image to Joint, Kasi, Kanthu, or Pratyu. Rent
-          received via a flat&apos;s QR auto-tags the matching account. You can
-          still override when recording payments.
+          Map each owner UPI ID or QR image to Joint, Kasi, Kanthu, or Pratyu.
+          Per-flat UPI and QR are edited in the section below. Rent received via
+          a flat&apos;s QR auto-tags the matching account unless you set
+          &quot;Credit to account&quot; on that flat.
         </p>
       </div>
 
@@ -135,17 +137,12 @@ export default function PaymentAccountsPanel({
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </label>
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-slate-700">
-                  QR image URL
-                </span>
-                <input
-                  name="upi_qr_url"
-                  defaultValue={account.upiQrUrl ?? ""}
-                  placeholder="/upi/default-receive-qr.png"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
+              <div className="grid gap-4 lg:col-span-2 sm:grid-cols-2">
+                <QrImageFields
+                  defaultUrl={account.upiQrUrl}
+                  urlPlaceholder="/upi/default-receive-qr.png"
                 />
-              </label>
+              </div>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">
                   Default for building

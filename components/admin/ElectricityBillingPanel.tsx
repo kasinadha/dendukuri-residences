@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   fetchFlatsForElectricityBillingAction,
@@ -17,6 +17,12 @@ import {
   type FlatOption,
   type OccupiedFlatForBilling,
 } from "@/lib/electricity";
+import {
+  clearElectricityBillingDraft,
+  loadElectricityBillingDraft,
+  saveElectricityBillingDraft,
+} from "@/lib/electricity-billing-draft";
+import { previousIstYearMonthKey } from "@/lib/billing-month-key";
 import { formatInr } from "@/lib/receipts";
 
 function todayIsoDate(): string {
@@ -29,11 +35,7 @@ function todayIsoDate(): string {
 }
 
 function currentBillingMonth(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-  }).format(new Date());
+  return previousIstYearMonthKey();
 }
 
 type FlatReadingState = {
@@ -123,6 +125,53 @@ function occupancyBadge(kind?: ElectricityBillingOccupancyKind): string | null {
   }
 }
 
+function wingMetersFromLastReadings(lastBuilding: {
+  C: number | null;
+  D: number | null;
+}): Record<BuildingWing, WingMeterState> {
+  return {
+    C: emptyWingMeter(lastBuilding.C),
+    D: emptyWingMeter(lastBuilding.D),
+  };
+}
+
+function applyBillingMonthData(
+  flats: OccupiedFlatForBilling[],
+  lastBuilding: { C: number | null; D: number | null },
+  billingMonth: string
+) {
+  const draft = loadElectricityBillingDraft(billingMonth);
+  if (draft) {
+    return {
+      wingMeters: draft.wingMeters,
+      flatRowsByWing: {
+        C: rowsForWing(flats, "C", draft.flatRowsByWing.C),
+        D: rowsForWing(flats, "D", draft.flatRowsByWing.D),
+      },
+      readingDate: draft.readingDate,
+      ratePerUnit: draft.ratePerUnit,
+      basicChargePerKw: draft.basicChargePerKw,
+      serviceChargePercent: draft.serviceChargePercent,
+      draftRestored: true,
+    };
+  }
+
+  return {
+    wingMeters: wingMetersFromLastReadings(lastBuilding),
+    flatRowsByWing: {
+      C: rowsForWing(flats, "C", []),
+      D: rowsForWing(flats, "D", []),
+    },
+    readingDate: todayIsoDate(),
+    ratePerUnit: String(DEFAULT_ELECTRICITY_BILLING_CONFIG.ratePerUnit),
+    basicChargePerKw: String(DEFAULT_ELECTRICITY_BILLING_CONFIG.basicChargePerKw),
+    serviceChargePercent: String(
+      DEFAULT_ELECTRICITY_BILLING_CONFIG.serviceChargePercent
+    ),
+    draftRestored: false,
+  };
+}
+
 type Props = {
   occupiedFlats: OccupiedFlatForBilling[];
   lastBuildingReadings: { C: number | null; D: number | null };
@@ -135,8 +184,10 @@ export default function ElectricityBillingPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [loadingFlats, setLoadingFlats] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const hydratingRef = useRef(false);
 
   const [activeWing, setActiveWing] = useState<BuildingWing>("C");
   const [billingMonth, setBillingMonth] = useState(currentBillingMonth());
@@ -178,6 +229,7 @@ export default function ElectricityBillingPanel({
   useEffect(() => {
     let cancelled = false;
     setLoadingFlats(true);
+    hydratingRef.current = true;
 
     fetchFlatsForElectricityBillingAction(billingMonth)
       .then((result) => {
@@ -188,19 +240,62 @@ export default function ElectricityBillingPanel({
         }
         setAllFlats(result.allFlats);
         setLastReadingsByFlatId(result.lastReadingsByFlatId);
-        setFlatRowsByWing((current) => ({
-          C: rowsForWing(result.flats, "C", current.C),
-          D: rowsForWing(result.flats, "D", current.D),
-        }));
+
+        const applied = applyBillingMonthData(
+          result.flats,
+          result.lastBuildingReadings,
+          billingMonth
+        );
+        setWingMeters(applied.wingMeters);
+        setFlatRowsByWing(applied.flatRowsByWing);
+        setReadingDate(applied.readingDate);
+        setRatePerUnit(applied.ratePerUnit);
+        setBasicChargePerKw(applied.basicChargePerKw);
+        setServiceChargePercent(applied.serviceChargePercent);
+        setDraftRestored(applied.draftRestored);
       })
       .finally(() => {
-        if (!cancelled) setLoadingFlats(false);
+        if (!cancelled) {
+          setLoadingFlats(false);
+          window.setTimeout(() => {
+            hydratingRef.current = false;
+          }, 0);
+        }
       });
 
     return () => {
       cancelled = true;
     };
   }, [billingMonth]);
+
+  useEffect(() => {
+    if (hydratingRef.current || loadingFlats) return;
+
+    const timer = window.setTimeout(() => {
+      saveElectricityBillingDraft({
+        version: 1,
+        billingMonth,
+        readingDate,
+        ratePerUnit,
+        basicChargePerKw,
+        serviceChargePercent,
+        wingMeters,
+        flatRowsByWing,
+        savedAt: new Date().toISOString(),
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    billingMonth,
+    readingDate,
+    ratePerUnit,
+    basicChargePerKw,
+    serviceChargePercent,
+    wingMeters,
+    flatRowsByWing,
+    loadingFlats,
+  ]);
 
   const addableFlats = useMemo(() => {
     const listed = new Set(flatRows.map((row) => row.flatId));
@@ -337,6 +432,8 @@ export default function ElectricityBillingPanel({
       setSuccess(
         `${buildingWingLabel(activeWing)}: bills generated for ${result.flatCount} flat(s). Total ${formatInr(result.totalBilled)}.`
       );
+      clearElectricityBillingDraft(billingMonth);
+      setDraftRestored(false);
       router.refresh();
     });
   }
@@ -356,9 +453,16 @@ export default function ElectricityBillingPanel({
       </h3>
       <p className="mt-1 text-sm text-slate-500">
         Flats are listed for the selected billing month — including mid-month
-        move-ins and vacated units that were occupied that month. Uncheck a flat
-        to skip it (e.g. vacant from next month). Add a flat manually if needed.
+        move-ins and vacated units that were occupied that month. Previous meter
+        readings auto-fill from the last saved bill. Your entries are saved as a
+        draft in this browser until bills are generated.
       </p>
+
+      {draftRestored ? (
+        <p className="mt-3 rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          Restored unsaved draft for {billingMonth} from this browser.
+        </p>
+      ) : null}
 
       <div
         className="mt-6 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1 sm:max-w-md"
@@ -389,7 +493,7 @@ export default function ElectricityBillingPanel({
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">
-            Billing month
+            Usage month
           </span>
           <input
             name="billing_month"
@@ -399,6 +503,10 @@ export default function ElectricityBillingPanel({
             onChange={(e) => setBillingMonth(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
           />
+          <span className="mt-1 block text-xs text-slate-500">
+            Month the meters cover — not the day you enter them. A reading taken
+            in early September is August usage and shows on August dues.
+          </span>
           {loadingFlats ? (
             <span className="mt-1 block text-xs text-slate-500">
               Loading flats for this month…
@@ -423,6 +531,10 @@ export default function ElectricityBillingPanel({
           <span className="mb-2 block text-sm font-semibold text-slate-700">
             {buildingWingLabel(activeWing)} — previous main meter reading
           </span>
+          <p className="mb-2 text-xs text-slate-500">
+            From last saved {buildingWingLabel(activeWing)} bill (current reading
+            becomes next month&apos;s previous).
+          </p>
           <input
             type="number"
             min={0}

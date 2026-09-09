@@ -1,4 +1,6 @@
+import TenantCleanlinessForm from "@/components/tenant/TenantCleanlinessForm";
 import TenantMaintenanceForm from "@/components/tenant/TenantMaintenanceForm";
+import MaintenanceMediaThumbs from "@/components/MaintenanceMediaThumbs";
 import { requireTenant } from "@/lib/auth";
 import { listMaintenanceRequests } from "@/lib/maintenance";
 import { formatInr } from "@/lib/receipts";
@@ -18,11 +20,15 @@ export default async function TenantMaintenancePage() {
         Repair requests
       </h2>
       <p className="mt-2 text-slate-500">
-        Raise issues for flat {ctx?.flatNumber ?? "—"} and track status.
+        Raise repairs for flat {ctx?.flatNumber ?? "—"}, or report cleanliness
+        with photos or a short video if it is not being handled.
       </p>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <TenantMaintenanceForm />
+        <div className="space-y-6">
+          <TenantMaintenanceForm />
+          <TenantCleanlinessForm />
+        </div>
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-4">
             <h3 className="text-lg font-bold text-slate-900">Your requests</h3>
@@ -36,8 +42,12 @@ export default async function TenantMaintenancePage() {
                   <p className="font-semibold text-slate-900">{row.title}</p>
                   <p className="mt-1 text-sm text-slate-500">
                     {row.status} · {row.priority}
+                    {row.category === "cleanliness" ? " · cleanliness" : ""}
                     {row.cost != null ? ` · ${formatInr(row.cost)}` : ""}
                   </p>
+                  {row.photoUrls.length > 0 ? (
+                    <MaintenanceMediaThumbs urls={row.photoUrls} />
+                  ) : null}
                 </li>
               ))}
             </ul>

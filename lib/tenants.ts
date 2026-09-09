@@ -19,6 +19,8 @@ export type TenantListItem = {
   depositAmount: number | null;
   depositPaid: number | null;
   depositPaidDate: string | null;
+  depositReturned?: number | null;
+  depositReturnedDate?: string | null;
   monthlyCharges: TenantMonthlyCharges | null;
   tenancyStatus: string | null;
   hasActiveTenancy: boolean;
@@ -29,6 +31,7 @@ export type TenantListItem = {
   isArchived: boolean;
   profileId: string | null;
   hasPortalLogin: boolean;
+  moveInDate: string | null;
 };
 
 function num(value: unknown): number | null {
@@ -59,6 +62,8 @@ type TenancyJoin = {
   deposit_amount: number | string | null;
   deposit_paid: number | string | null;
   deposit_paid_date: string | null;
+  deposit_returned?: number | string | null;
+  deposit_returned_date?: string | null;
   maintenance_charge: number | string | null;
   car_parking_charge: number | string | null;
   washing_machine_charge: number | string | null;
@@ -104,6 +109,19 @@ export async function updateTenantProfile(
     return { ok: false, error: tenantError.message };
   }
 
+  const { data: tenantRow } = await supabase
+    .from("tenants")
+    .select("profile_id")
+    .eq("id", input.tenantId)
+    .maybeSingle();
+
+  if (tenantRow?.profile_id) {
+    await supabase
+      .from("profiles")
+      .update({ full_name: input.fullName.trim() })
+      .eq("id", tenantRow.profile_id);
+  }
+
   return { ok: true };
 }
 
@@ -115,6 +133,8 @@ export async function updateTenantTenancyTerms(
     depositAmount: number | null;
     depositPaid: number | null;
     depositPaidDate: string | null;
+    depositReturned: number | null;
+    depositReturnedDate: string | null;
     maintenanceCharge: number | null;
     carParkingCharge: number | null;
     washingMachineCharge: number | null;
@@ -149,6 +169,12 @@ export async function updateTenantTenancyTerms(
     }
   }
 
+  if (input.depositReturned != null) {
+    if (!Number.isFinite(input.depositReturned) || input.depositReturned < 0) {
+      return { ok: false, error: "Enter a valid deposit returned amount." };
+    }
+  }
+
   for (const [label, value] of [
     ["Maintenance", input.maintenanceCharge],
     ["Car parking", input.carParkingCharge],
@@ -166,6 +192,8 @@ export async function updateTenantTenancyTerms(
     security_deposit: input.depositAmount,
     deposit_paid: input.depositPaid,
     deposit_paid_date: input.depositPaidDate || null,
+    deposit_returned: input.depositReturned ?? 0,
+    deposit_returned_date: input.depositReturnedDate || null,
     maintenance_charge: input.maintenanceCharge ?? 0,
     car_parking_charge: input.carParkingCharge ?? 0,
     washing_machine_charge: input.washingMachineCharge ?? 0,
@@ -190,6 +218,9 @@ export async function updateTenantTenancyTerms(
     }
     return { ok: false, error: tenancyError.message };
   }
+
+  const { generateDraftAgreementForTenancy } = await import("@/lib/agreements");
+  await generateDraftAgreementForTenancy(supabase, input.tenancyId);
 
   return { ok: true };
 }
@@ -429,6 +460,48 @@ export async function recordTenancyVacateDate(
   return { ok: true };
 }
 
+export async function updateTenancyMoveInDate(
+  supabase: SupabaseClient,
+  input: { tenancyId: string; startDate: string | null }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tenancyId = input.tenancyId.trim();
+  if (!tenancyId) return { ok: false, error: "Missing tenancy." };
+
+  const startDate = input.startDate?.trim() || null;
+  if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    return { ok: false, error: "Move-in date must be YYYY-MM-DD." };
+  }
+
+  const { data: tenancy, error: loadError } = await supabase
+    .from("tenancies")
+    .select("id, status")
+    .eq("id", tenancyId)
+    .maybeSingle();
+
+  if (loadError || !tenancy) {
+    return { ok: false, error: loadError?.message ?? "Tenancy not found." };
+  }
+
+  if (!isActiveTenancyStatus(tenancy.status)) {
+    return {
+      ok: false,
+      error: "Move-in date can only be set on an active tenancy.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("tenancies")
+    .update({ start_date: startDate })
+    .eq("id", tenancyId);
+
+  if (error) return { ok: false, error: error.message };
+
+  const { generateDraftAgreementForTenancy } = await import("@/lib/agreements");
+  await generateDraftAgreementForTenancy(supabase, tenancyId);
+
+  return { ok: true };
+}
+
 export async function listTenantsForAdmin(
   supabase: SupabaseClient
 ): Promise<TenantListItem[]> {
@@ -452,6 +525,8 @@ export async function listTenantsForAdmin(
         deposit_amount,
         deposit_paid,
         deposit_paid_date,
+        deposit_returned,
+        deposit_returned_date,
         maintenance_charge,
         car_parking_charge,
         washing_machine_charge,
@@ -483,6 +558,8 @@ export async function listTenantsForAdmin(
           deposit_amount,
           deposit_paid,
           deposit_paid_date,
+          deposit_returned,
+          deposit_returned_date,
           flats ( flat_number, flat_type, status, maintenance_amount )
         )
       `
@@ -579,6 +656,8 @@ function mapTenantRows(
       depositAmount,
       depositPaid: num(activeTenancy?.deposit_paid),
       depositPaidDate: activeTenancy?.deposit_paid_date ?? null,
+      depositReturned: num(activeTenancy?.deposit_returned),
+      depositReturnedDate: activeTenancy?.deposit_returned_date ?? null,
       monthlyCharges,
       tenancyStatus: displayTenancy?.status?.trim() || null,
       hasActiveTenancy: hasActive,
@@ -590,6 +669,66 @@ function mapTenantRows(
       isArchived: Boolean(row.archived_at),
       profileId: row.profile_id ?? null,
       hasPortalLogin: Boolean(row.profile_id),
+      moveInDate: activeTenancy?.start_date ?? null,
     };
   });
+}
+
+export async function adjustTenancyDepositPaid(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    amount: number;
+    paymentDate?: string;
+  }
+): Promise<{ ok: true; depositPaid: number } | { ok: false; error: string }> {
+  if (!Number.isFinite(input.amount) || input.amount === 0) {
+    return { ok: false, error: "Invalid deposit amount." };
+  }
+
+  const { data, error } = await supabase
+    .from("tenancies")
+    .select("deposit_paid, deposit_amount, security_deposit")
+    .eq("id", input.tenancyId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, error: error?.message || "Tenancy not found." };
+  }
+
+  const nextPaid = Math.max(0, (num(data.deposit_paid) ?? 0) + input.amount);
+  const depositAmount =
+    num(data.deposit_amount) ?? num(data.security_deposit) ?? null;
+  const { error: updateError } = await supabase
+    .from("tenancies")
+    .update({
+      deposit_paid: nextPaid,
+      ...(input.amount > 0 && input.paymentDate
+        ? { deposit_paid_date: input.paymentDate }
+        : {}),
+      ...(depositAmount != null
+        ? { deposit_amount: depositAmount, security_deposit: depositAmount }
+        : {}),
+    })
+    .eq("id", input.tenancyId);
+
+  if (updateError) {
+    return { ok: false, error: updateError.message };
+  }
+
+  return { ok: true, depositPaid: nextPaid };
+}
+
+export async function incrementTenancyDepositPaid(
+  supabase: SupabaseClient,
+  input: {
+    tenancyId: string;
+    amount: number;
+    paymentDate: string;
+  }
+): Promise<{ ok: true; depositPaid: number } | { ok: false; error: string }> {
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return { ok: false, error: "Invalid deposit amount." };
+  }
+  return adjustTenancyDepositPaid(supabase, input);
 }

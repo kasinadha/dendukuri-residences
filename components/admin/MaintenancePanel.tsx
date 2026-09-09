@@ -7,6 +7,7 @@ import {
   updateMaintenanceStatusAction,
 } from "@/app/admin/maintenance/actions";
 import AccountSelectField from "@/components/admin/AccountSelectField";
+import MaintenanceMediaThumbs from "@/components/MaintenanceMediaThumbs";
 import {
   filterFlatsByBuilding,
   type FlatLocationOption,
@@ -26,6 +27,7 @@ type RequestRow = {
   costLabel: string;
   category: string | null;
   payerLabel: string | null;
+  photoUrls: string[];
 };
 
 export default function MaintenancePanel({
@@ -251,6 +253,9 @@ export default function MaintenancePanel({
                       <p className="mt-2 text-sm text-slate-600">
                         {row.description}
                       </p>
+                    ) : null}
+                    {row.photoUrls.length > 0 ? (
+                      <MaintenanceMediaThumbs urls={row.photoUrls} />
                     ) : null}
                   </div>
                   <div className="flex flex-col gap-2 sm:items-end">

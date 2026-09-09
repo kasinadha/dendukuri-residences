@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { friendlyDatabaseError, isMissingColumnError } from "@/lib/money";
 
 type FlatPaymentFields = {
   id?: string;
@@ -15,9 +16,11 @@ export type TenancyForPayment = {
   flats: FlatPaymentFields | FlatPaymentFields[] | null;
 };
 
-function isMissingColumnError(message: string | null | undefined): boolean {
-  return Boolean(message && /column .* does not exist|could not find.*column/i.test(message));
-}
+const OPTIONAL_PAYMENT_COLUMNS = [
+  "receiver_account_id",
+  "billing_month",
+  "parent_payment_id",
+] as const;
 
 /** Load tenancy for recording payment; tolerates missing payment_account_id column. */
 export async function fetchTenancyForPayment(
@@ -85,61 +88,51 @@ export async function insertPaymentRecord(
   | { ok: true; paymentId: string }
   | { ok: false; error: string }
 > {
-  const first = await supabase
-    .from("payments")
-    .insert(payload)
-    .select("id")
-    .single();
+  let nextPayload: Record<string, unknown> = { ...payload };
 
-  if (!first.error && first.data?.id) {
-    return { ok: true, paymentId: first.data.id };
-  }
-
-  const msg = first.error?.message ?? "Could not record payment.";
-
-  if (
-    payload.receiver_account_id != null &&
-    isMissingColumnError(msg)
-  ) {
-    const { receiver_account_id: _omit, ...withoutReceiver } = payload;
-    const retry = await supabase
+  for (let attempt = 0; attempt < OPTIONAL_PAYMENT_COLUMNS.length + 1; attempt += 1) {
+    const result = await supabase
       .from("payments")
-      .insert(withoutReceiver)
+      .insert(nextPayload)
       .select("id")
       .single();
 
-    if (!retry.error && retry.data?.id) {
-      return { ok: true, paymentId: retry.data.id };
+    if (!result.error && result.data?.id) {
+      return { ok: true, paymentId: result.data.id };
     }
 
-    const retryMsg = retry.error?.message ?? msg;
-    if (/amount_due|column .* does not exist/i.test(retryMsg)) {
+    const msg = result.error?.message ?? "Could not record payment.";
+
+    if (/amount_due/i.test(msg) && isMissingColumnError(msg)) {
       return {
         ok: false,
         error:
           "Database needs Phase 11 migration. Run supabase/migrations/20260815_phase11_rent_payment_receipts.sql",
       };
     }
-    return { ok: false, error: retryMsg };
+
+    const missingOptional = OPTIONAL_PAYMENT_COLUMNS.find(
+      (column) =>
+        nextPayload[column] !== undefined &&
+        isMissingColumnError(msg) &&
+        new RegExp(column, "i").test(msg)
+    );
+    if (missingOptional) {
+      const { [missingOptional]: _omit, ...rest } = nextPayload;
+      nextPayload = rest;
+      continue;
+    }
+
+    if (isMissingColumnError(msg) && nextPayload.receiver_account_id !== undefined) {
+      const { receiver_account_id: _omit, ...rest } = nextPayload;
+      nextPayload = rest;
+      continue;
+    }
+
+    return { ok: false, error: friendlyDatabaseError(msg) };
   }
 
-  if (/amount_due/i.test(msg) && isMissingColumnError(msg)) {
-    return {
-      ok: false,
-      error:
-        "Database needs Phase 11 migration. Run supabase/migrations/20260815_phase11_rent_payment_receipts.sql",
-    };
-  }
-
-  if (/receiver_account_id/i.test(msg) && isMissingColumnError(msg)) {
-    return {
-      ok: false,
-      error:
-        "Database needs building revenue migration. Run supabase/migrations/20260829_building_revenue_accounts.sql",
-    };
-  }
-
-  return { ok: false, error: msg };
+  return { ok: false, error: "Could not record payment." };
 }
 
 export function unwrapFlat(

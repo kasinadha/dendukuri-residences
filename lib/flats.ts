@@ -477,3 +477,137 @@ export async function updateFlat(
   if (error) return { ok: false, error: error.message };
   return { ok: true, id: flatId };
 }
+
+export type FlatUpiMapping = {
+  id: string;
+  flatNumber: string;
+  tenantName: string | null;
+  isOccupied: boolean;
+  upiId: string | null;
+  upiQrUrl: string | null;
+  paymentAccountId: string | null;
+};
+
+export async function listFlatsForUpiMapping(
+  supabase: SupabaseClient
+): Promise<FlatUpiMapping[]> {
+  const flats = await listFlatsForAdmin(supabase);
+  const { data } = await supabase.from("flats").select("id, payment_account_id");
+  const accountById = new Map<string, string | null>();
+  for (const row of data ?? []) {
+    const id = String((row as { id: string }).id);
+    const accountId = (row as { payment_account_id?: string | null })
+      .payment_account_id;
+    accountById.set(id, accountId?.trim() || null);
+  }
+
+  return flats.map((flat) => ({
+    id: flat.id,
+    flatNumber: flat.flatNumber,
+    tenantName: flat.tenantName,
+    isOccupied: flat.isOccupied,
+    upiId: flat.upiId,
+    upiQrUrl: flat.upiQrUrl,
+    paymentAccountId: accountById.get(flat.id) ?? null,
+  }));
+}
+
+function flatUpiPayload(input: {
+  upiId?: string | null;
+  upiQrUrl?: string | null;
+  paymentAccountId?: string | null;
+}): Record<string, unknown> {
+  return {
+    upi_id: input.upiId?.trim() || null,
+    upi_qr_url: input.upiQrUrl?.trim() || null,
+    payment_account_id: input.paymentAccountId?.trim() || null,
+  };
+}
+
+async function writeFlatUpiPayload(
+  supabase: SupabaseClient,
+  payload: Record<string, unknown>,
+  match: { ids: string[] } | { wingPrefix: string }
+): Promise<{ ok: true; updated: number } | { ok: false; error: string }> {
+  let query = supabase.from("flats").update(payload);
+  query =
+    "ids" in match
+      ? query.in("id", match.ids)
+      : query.ilike("flat_number", `${match.wingPrefix}%`);
+
+  const { data, error } = await query.select("id");
+  if (!error) {
+    return { ok: true, updated: data?.length ?? 0 };
+  }
+
+  if (!/payment_account_id|schema cache/i.test(error.message)) {
+    if (/upi_id|upi_qr_url|does not exist/i.test(error.message)) {
+      return {
+        ok: false,
+        error:
+          "Flat UPI columns are missing. Run supabase/migrations/20260815_phase10_flat_upi_qr.sql in Supabase.",
+      };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  const withoutAccount = { ...payload };
+  delete withoutAccount.payment_account_id;
+  let retry = supabase.from("flats").update(withoutAccount);
+  retry =
+    "ids" in match
+      ? retry.in("id", match.ids)
+      : retry.ilike("flat_number", `${match.wingPrefix}%`);
+  const retried = await retry.select("id");
+  if (retried.error) return { ok: false, error: retried.error.message };
+  return { ok: true, updated: retried.data?.length ?? 0 };
+}
+
+export async function updateFlatUpiMapping(
+  supabase: SupabaseClient,
+  input: {
+    flatId: string;
+    upiId?: string | null;
+    upiQrUrl?: string | null;
+    paymentAccountId?: string | null;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const flatId = input.flatId.trim();
+  if (!flatId) return { ok: false, error: "Missing flat." };
+  const result = await writeFlatUpiPayload(
+    supabase,
+    flatUpiPayload(input),
+    { ids: [flatId] }
+  );
+  if (!result.ok) return result;
+  return { ok: true };
+}
+
+export async function updateFlatUpiMappingForWing(
+  supabase: SupabaseClient,
+  input: {
+    wing: "C" | "D";
+    upiId?: string | null;
+    upiQrUrl?: string | null;
+    paymentAccountId?: string | null;
+  }
+): Promise<{ ok: true; updated: number } | { ok: false; error: string }> {
+  if (input.wing !== "C" && input.wing !== "D") {
+    return { ok: false, error: "Choose Building C or D." };
+  }
+  const payload: Record<string, unknown> = {};
+  if (input.upiId?.trim()) payload.upi_id = input.upiId.trim();
+  if (input.upiQrUrl?.trim()) payload.upi_qr_url = input.upiQrUrl.trim();
+  if (input.paymentAccountId?.trim()) {
+    payload.payment_account_id = input.paymentAccountId.trim();
+  }
+  if (Object.keys(payload).length === 0) {
+    return {
+      ok: false,
+      error: "Enter a UPI ID, QR URL, or account to apply to the building.",
+    };
+  }
+  return writeFlatUpiPayload(supabase, payload, {
+    wingPrefix: input.wing,
+  });
+}

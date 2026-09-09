@@ -63,7 +63,7 @@ export function calculateFlatElectricityBill(input: {
     basicCharge: roundMoney(basicCharge),
     subtotalBeforeService: roundMoney(subtotalBeforeService),
     serviceCharge: roundMoney(serviceCharge),
-    totalDue: roundMoney(totalDue),
+    totalDue: roundElectricityDue(totalDue),
   };
 }
 
@@ -84,6 +84,12 @@ export function calculateCommonSharePerFlat(input: {
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/** Electricity amounts collected from tenants are always whole rupees. */
+export function roundElectricityDue(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value);
 }
 
 export function formatElectricityFormulaSummary(

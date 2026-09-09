@@ -1,0 +1,207 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+
+export const IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+
+export const DOCUMENT_MIME_TYPES = new Set([
+  ...IMAGE_MIME_TYPES,
+  "application/pdf",
+]);
+
+export const VIDEO_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/3gpp",
+]);
+
+export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+export const MAX_MAINTENANCE_MEDIA = 4;
+export const MAX_MAINTENANCE_VIDEOS = 2;
+
+export const MAINTENANCE_MEDIA_ACCEPT =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm,video/3gpp,.mp4,.mov,.m4v,.webm,.3gp";
+
+export function isVideoMime(mime: string): boolean {
+  return VIDEO_MIME_TYPES.has(mime.trim().toLowerCase());
+}
+
+export function isVideoSrc(src: string): boolean {
+  const path = src.split("?")[0].toLowerCase();
+  return /\.(mp4|m4v|mov|webm|3gp)$/.test(path);
+}
+
+export function extForMime(mime: string): string {
+  switch (mime) {
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "image/heic":
+      return "heic";
+    case "image/heif":
+      return "heif";
+    case "application/pdf":
+      return "pdf";
+    case "video/webm":
+      return "webm";
+    case "video/quicktime":
+      return "mov";
+    case "video/3gpp":
+      return "3gp";
+    case "video/mp4":
+      return "mp4";
+    default:
+      return "jpg";
+  }
+}
+
+export function mimeOfFile(file: File): string {
+  const typed = file.type.trim().toLowerCase();
+  if (typed && typed !== "application/octet-stream") return typed;
+  const name = file.name.trim().toLowerCase();
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".heic")) return "image/heic";
+  if (name.endsWith(".heif")) return "image/heif";
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".mp4") || name.endsWith(".m4v")) return "video/mp4";
+  if (name.endsWith(".mov")) return "video/quicktime";
+  if (name.endsWith(".webm")) return "video/webm";
+  if (name.endsWith(".3gp")) return "video/3gpp";
+  return typed;
+}
+
+export function validateUploadFile(
+  file: File | null | undefined,
+  options: {
+    allowed: Set<string>;
+    maxBytes: number;
+    emptyOk?: boolean;
+    imageLabel?: string;
+  }
+):
+  | { ok: true; file: File; mime: string }
+  | { ok: true; file: null; mime: null }
+  | { ok: false; error: string } {
+  if (!file || file.size === 0) {
+    if (options.emptyOk !== false) return { ok: true, file: null, mime: null };
+    return { ok: false, error: "Choose a file to upload." };
+  }
+  const mime = mimeOfFile(file);
+  if (!options.allowed.has(mime)) {
+    return {
+      ok: false,
+      error:
+        options.imageLabel ??
+        "File must be a JPEG, PNG, WebP, HEIC image, or PDF.",
+    };
+  }
+  if (file.size > options.maxBytes) {
+    const mb = Math.round(options.maxBytes / (1024 * 1024));
+    return { ok: false, error: `File must be ${mb} MB or smaller.` };
+  }
+  return { ok: true, file, mime };
+}
+
+export function validateImageFile(
+  file: File | null | undefined,
+  emptyOk = true
+) {
+  return validateUploadFile(file, {
+    allowed: IMAGE_MIME_TYPES,
+    maxBytes: MAX_IMAGE_BYTES,
+    emptyOk,
+    imageLabel: "Upload a JPEG, PNG, WebP, or HEIC image.",
+  });
+}
+
+export function validateMaintenanceMediaFile(
+  file: File | null | undefined,
+  emptyOk = false
+) {
+  if (!file || file.size === 0) {
+    if (emptyOk) return { ok: true as const, file: null, mime: null };
+    return { ok: false as const, error: "Choose a photo or video to upload." };
+  }
+  const mime = mimeOfFile(file);
+  if (isVideoMime(mime)) {
+    return validateUploadFile(file, {
+      allowed: VIDEO_MIME_TYPES,
+      maxBytes: MAX_VIDEO_BYTES,
+      emptyOk,
+      imageLabel: "Video must be MP4, MOV, or WebM, up to 25 MB.",
+    });
+  }
+  return validateUploadFile(file, {
+    allowed: IMAGE_MIME_TYPES,
+    maxBytes: MAX_IMAGE_BYTES,
+    emptyOk,
+    imageLabel:
+      "Upload a JPEG, PNG, WebP, or HEIC photo, or an MP4 / MOV / WebM video.",
+  });
+}
+
+export async function uploadStorageObject(
+  supabase: SupabaseClient,
+  input: {
+    bucket: string;
+    path: string;
+    file: File;
+    contentType?: string;
+    upsert?: boolean;
+    missingHint: string;
+  }
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const { error } = await supabase.storage.from(input.bucket).upload(
+    input.path,
+    input.file,
+    {
+      cacheControl: "3600",
+      contentType: input.contentType || input.file.type || "application/octet-stream",
+      upsert: input.upsert ?? false,
+    }
+  );
+  if (error) {
+    const msg = error.message ?? "";
+    if (/bucket not found|not found/i.test(msg)) {
+      return { ok: false, error: input.missingHint };
+    }
+    return { ok: false, error: msg };
+  }
+  return { ok: true, path: input.path };
+}
+
+export async function createSignedStorageUrl(
+  supabase: SupabaseClient,
+  bucket: string,
+  path: string | null | undefined,
+  expiresIn = 60 * 60
+): Promise<string | null> {
+  if (!path?.trim()) return null;
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path.trim(), expiresIn);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
+export function asFormFile(formData: FormData, key: string): File | null {
+  const value = formData.get(key);
+  return value instanceof File ? value : null;
+}
+
+export function asFormFiles(formData: FormData, key: string): File[] {
+  return formData
+    .getAll(key)
+    .filter((item): item is File => item instanceof File && item.size > 0);
+}

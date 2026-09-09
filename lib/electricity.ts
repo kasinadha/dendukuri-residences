@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { previousIstYearMonthKey } from "@/lib/billing-month-key";
+import { friendlyDatabaseError } from "@/lib/money";
 import {
   describeFlatBillingOccupancy,
   tenancyOverlapsBillingMonth,
@@ -9,6 +11,7 @@ import {
   calculateCommonSharePerFlat,
   calculateFlatElectricityBill,
   DEFAULT_ELECTRICITY_BILLING_CONFIG,
+  roundElectricityDue,
   type ElectricityBillingConfig,
   type FlatElectricityBillBreakdown,
 } from "@/lib/electricity-billing";
@@ -71,14 +74,6 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-function currentMonthKey(now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-  }).format(now);
-}
-
 export async function listFlatsForSelect(
   supabase: SupabaseClient
 ): Promise<FlatOption[]> {
@@ -104,7 +99,7 @@ export async function listOccupiedFlatsForBilling(
 ): Promise<OccupiedFlatForBilling[]> {
   return listFlatsForElectricityBilling(
     supabase,
-    billingMonthKey?.trim() || currentMonthKey()
+    billingMonthKey?.trim() || previousIstYearMonthKey()
   );
 }
 
@@ -156,6 +151,7 @@ export async function listFlatsForElectricityBilling(
     });
   }
 
+  const lastByFlatId = await getLastReadingsByFlatId(supabase);
   const results: OccupiedFlatForBilling[] = [];
   for (const [flatId, { flatNumber, tenancies }] of byFlat) {
     const occupancy = describeFlatBillingOccupancy(
@@ -168,13 +164,12 @@ export async function listFlatsForElectricityBilling(
       billingMonthKey
     );
 
-    const last = await getLastReadingForFlat(supabase, flatId);
     results.push({
       flatId,
       flatNumber,
       tenantName: occupancy.tenantName,
       buildingWing: buildingWingFromFlatNumber(flatNumber),
-      previousReading: last?.currentReading ?? 0,
+      previousReading: lastByFlatId[flatId] ?? 0,
       sanctionedKw: 2,
       occupancyKind: occupancy.occupancyKind,
       occupancyNote: occupancy.occupancyNote || undefined,
@@ -293,7 +288,8 @@ function mapReadingRow(row: Record<string, unknown>): ElectricityReading {
       row.service_charge_amount == null
         ? null
         : num(row.service_charge_amount),
-    billAmount: row.bill_amount == null ? null : num(row.bill_amount),
+    billAmount:
+      row.bill_amount == null ? null : roundElectricityDue(num(row.bill_amount)),
     status: String(row.status ?? "recorded").trim() || "recorded",
     notes: (row.notes as string | null) ?? null,
     billingMonth: run?.billing_month ?? null,
@@ -488,6 +484,14 @@ export async function createElectricityBillingRun(
   if (!input.readingDate) {
     return { ok: false, error: "Reading date is required." };
   }
+  if (
+    !Number.isFinite(input.buildingCurrentReading) ||
+    !Number.isFinite(input.buildingPreviousReading) ||
+    input.buildingPreviousReading < 0 ||
+    input.buildingCurrentReading < 0
+  ) {
+    return { ok: false, error: "Building meter readings must be 0 or more." };
+  }
   if (input.buildingCurrentReading < input.buildingPreviousReading) {
     return {
       ok: false,
@@ -499,10 +503,18 @@ export async function createElectricityBillingRun(
   }
 
   for (const flat of input.flats) {
+    if (
+      !Number.isFinite(flat.currentReading) ||
+      !Number.isFinite(flat.previousReading) ||
+      flat.currentReading < 0 ||
+      flat.previousReading < 0
+    ) {
+      return { ok: false, error: "Flat meter readings must be 0 or more." };
+    }
     if (flat.currentReading < flat.previousReading) {
       return {
         ok: false,
-        error: `Flat reading must be ≥ previous reading.`,
+        error: "Flat reading must be ≥ previous reading.",
       };
     }
   }
@@ -516,7 +528,20 @@ export async function createElectricityBillingRun(
     flats: input.flats,
   });
 
-  const billingMonth = input.billingMonth?.trim() || currentMonthKey();
+  const billingMonth = input.billingMonth?.trim() || previousIstYearMonthKey();
+
+  const { data: existingRun } = await supabase
+    .from("electricity_billing_runs")
+    .select("id")
+    .eq("billing_month", billingMonth)
+    .eq("building_wing", input.buildingWing)
+    .limit(1);
+  if (existingRun && existingRun.length > 0) {
+    return {
+      ok: false,
+      error: `A billing run for Building ${input.buildingWing} already exists for ${billingMonth}.`,
+    };
+  }
 
   const { data: run, error: runError } = await supabase
     .from("electricity_billing_runs")
@@ -539,20 +564,24 @@ export async function createElectricityBillingRun(
     .single();
 
   if (runError || !run) {
-    if (/electricity_billing_runs|does not exist/i.test(runError?.message ?? "")) {
+    const runMessage = runError?.message ?? "Could not save billing run.";
+    if (
+      /electricity_billing_runs|electricity_readings|building_wing|does not exist/i.test(
+        runMessage
+      )
+    ) {
       return {
         ok: false,
-        error:
-          "Run supabase/migrations/20260829_electricity_billing.sql and 20260830_electricity_building_wing.sql in Supabase SQL Editor.",
+        error: `Electricity billing tables are not ready (${runMessage}). Run supabase/migrations/20260830_electricity_billing_repair.sql in Supabase SQL Editor (or run 20260829_electricity_billing.sql then 20260830_electricity_building_wing.sql).`,
       };
     }
-    if (/unique|duplicate/i.test(runError?.message ?? "")) {
+    if (/unique|duplicate/i.test(runMessage)) {
       return {
         ok: false,
-        error: `A billing run for Building ${input.buildingWing} already exists for this month and reading date.`,
+        error: `A billing run for Building ${input.buildingWing} already exists for ${billingMonth}.`,
       };
     }
-    return { ok: false, error: runError?.message ?? "Could not save billing run." };
+    return { ok: false, error: friendlyDatabaseError(runMessage) };
   }
 
   const readingRows = input.flats.map((flat) => {
@@ -583,7 +612,7 @@ export async function createElectricityBillingRun(
 
   if (readingsError) {
     await supabase.from("electricity_billing_runs").delete().eq("id", run.id);
-    return { ok: false, error: readingsError.message };
+    return { ok: false, error: friendlyDatabaseError(readingsError.message) };
   }
 
   return { ok: true, billingRunId: run.id, preview };
@@ -603,8 +632,35 @@ export async function createElectricityReading(
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!input.flatId) return { ok: false, error: "Select a flat." };
   if (!input.readingDate) return { ok: false, error: "Reading date is required." };
+  if (
+    !Number.isFinite(input.previousReading) ||
+    !Number.isFinite(input.currentReading) ||
+    input.previousReading < 0 ||
+    input.currentReading < 0
+  ) {
+    return { ok: false, error: "Meter readings must be 0 or more." };
+  }
   if (input.currentReading < input.previousReading) {
     return { ok: false, error: "Current reading must be ≥ previous reading." };
+  }
+  if (
+    input.billAmount != null &&
+    (!Number.isFinite(input.billAmount) || input.billAmount < 0)
+  ) {
+    return { ok: false, error: "Bill amount cannot be negative." };
+  }
+
+  const { data: existing } = await supabase
+    .from("electricity_readings")
+    .select("id")
+    .eq("flat_id", input.flatId)
+    .eq("reading_date", input.readingDate)
+    .limit(1);
+  if (existing && existing.length > 0) {
+    return {
+      ok: false,
+      error: "A reading already exists for this flat on that date.",
+    };
   }
 
   const { data, error } = await supabase
@@ -615,7 +671,8 @@ export async function createElectricityReading(
       previous_reading: input.previousReading,
       current_reading: input.currentReading,
       flat_units: Math.max(0, input.currentReading - input.previousReading),
-      bill_amount: input.billAmount ?? null,
+      bill_amount:
+        input.billAmount == null ? null : roundElectricityDue(input.billAmount),
       status: input.status?.trim() || "recorded",
       notes: input.notes?.trim() || null,
     })
@@ -623,7 +680,10 @@ export async function createElectricityReading(
     .single();
 
   if (error || !data) {
-    return { ok: false, error: error?.message ?? "Could not save reading." };
+    return {
+      ok: false,
+      error: friendlyDatabaseError(error?.message ?? "Could not save reading."),
+    };
   }
 
   return { ok: true, id: data.id };
