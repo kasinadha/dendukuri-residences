@@ -1,7 +1,10 @@
 import { sendAllPendingAgreementWhatsAppReminders } from "@/lib/agreements";
 import { sendAllUnpaidWhatsAppReminders } from "@/lib/reminders";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getWhatsAppBusinessConfig } from "@/lib/whatsapp";
+import {
+  getWhatsAppBusinessConfig,
+  whatsappApiNotConfiguredError,
+} from "@/lib/whatsapp";
 
 /** Skip tenants already reminded in this window so a daily cron does not double-send. */
 export const AUTOMATED_REMINDER_SKIP_HOURS = 20;
@@ -28,8 +31,7 @@ export async function runAutomatedTenantReminders(): Promise<
   if (!whatsapp.apiEnabled) {
     return {
       ok: false,
-      error:
-        "WhatsApp Cloud API is not configured. Set WHATSAPP_CLOUD_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID so reminders can send without opening WhatsApp Web.",
+      error: whatsappApiNotConfiguredError(),
     };
   }
 

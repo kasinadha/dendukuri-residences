@@ -6,7 +6,7 @@ import { markRentRemindedAction, sendAllUnpaidWhatsAppRemindersAction, sendWhats
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr } from "@/lib/receipts";
 import type { UnpaidReminderRow } from "@/lib/reminders";
-import { WHATSAPP_BUSINESS_PHONE_E164 } from "@/lib/whatsapp";
+import { WHATSAPP_BUSINESS_PHONE_E164 } from "@/lib/whatsapp-phone";
 
 function statusBadgeClass(status: string) {
   switch (status) {
@@ -215,7 +215,7 @@ export default function UnpaidRentRemindersPanel({
           ) : (
             " via API, or open a draft in WhatsApp Web."
           )}{" "}
-          Daily automatic send is 9:00 AM IST when Cloud API and approved message templates are configured.
+          Daily automatic send is 9:00 AM IST when the WhatsApp API and approved message templates are configured.
         </p>
       </div>
 

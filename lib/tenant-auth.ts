@@ -3,6 +3,7 @@ import {
   classifyLoginIdentifier,
   normalizeIndianMobile,
 } from "@/lib/login-identifier";
+import { tenantPhoneWriteFields } from "@/lib/tenants";
 
 const LOGIN_EMAIL_DOMAIN = "tenant-auth.invalid";
 const LEGACY_LOGIN_EMAIL_DOMAIN = "login.dendukuri.local";
@@ -189,8 +190,8 @@ export async function createTenantPortalLogin(
     };
   }
 
-  const tenantUpdate: Record<string, string> = {
-    phone: mobile,
+  const tenantUpdate: Record<string, string | null> = {
+    ...tenantPhoneWriteFields(mobile),
   };
   if (optionalEmail) tenantUpdate.email = optionalEmail;
 
@@ -330,7 +331,7 @@ export async function resetTenantPortalPassword(
 
   const { error: phoneError } = await admin
     .from("tenants")
-    .update({ phone: mobile })
+    .update(tenantPhoneWriteFields(mobile))
     .eq("id", tenantId);
 
   if (phoneError) {

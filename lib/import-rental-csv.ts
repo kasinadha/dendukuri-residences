@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureDendukuriProperty, PROPERTY_NAME } from "@/lib/property";
+import { tenantPhoneWriteFields } from "@/lib/tenants";
 
 export type ImportSummary = {
   propertyId: string | null;
@@ -354,7 +355,7 @@ export async function importRentalTrackingCsv(
         .from("tenants")
         .insert({
           full_name: row.tenantName,
-          phone: row.phone,
+          ...tenantPhoneWriteFields(row.phone),
           notes: flags.length ? `Import review: ${flags.join("; ")}` : null,
         })
         .select("id")

@@ -57,6 +57,23 @@ In Supabase → Authentication → URL configuration, add:
 
 Do **not** add `SUPABASE_SERVICE_ROLE_KEY` to the Next.js app.
 
+### WhatsApp (admin send → tenant)
+
+One send path: Twilio if those env vars are set, otherwise Meta Cloud API. Run `supabase/migrations/20260912_tenant_whatsapp_twilio.sql` for `tenants.phone_number`, `tenants.whatsapp_opt_in`, and the private `whatsapp-media` bucket (receipt PDFs + signed URLs).
+
+**Meta (working path today — Twilio is not on Vercel Marketplace):**
+
+- `WHATSAPP_CLOUD_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`
+- `WHATSAPP_TEMPLATE_DUES`, `WHATSAPP_TEMPLATE_TERMS`, `WHATSAPP_TEMPLATE_LANG`
+- Webhook verify: `WHATSAPP_VERIFY_TOKEN` (optional `WHATSAPP_APP_SECRET`)
+- Callback URL: `https://<your-domain>/api/whatsapp/meta`
+
+**Twilio (optional, if you paste console credentials):**
+
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` (`whatsapp:+14155238886` sandbox or `whatsapp:+918867887061` live)
+- Optional: `TWILIO_CONTENT_SID_DUES`, `TWILIO_CONTENT_SID_TERMS`
+- Inbound URL: `https://<your-domain>/api/whatsapp/twilio`
+
 ## Scripts
 
 | Command | Purpose |
