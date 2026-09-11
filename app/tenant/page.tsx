@@ -21,18 +21,21 @@ export default async function TenantHomePage() {
   const { supabase, user, profile } = await requireTenant();
   const ctx = await getTenantPortalContext(supabase, user.id);
   const duesClient = getTenantDuesSupabaseClient(supabase);
-  const receipts = (await listReceiptViews(duesClient, { limit: 20 })).filter(
+  const [receiptsAll, electricity, maintenance, monthDue] = await Promise.all([
+    listReceiptViews(duesClient, { limit: 20 }),
+    ctx?.flatId
+      ? listElectricityReadings(supabase, { flatId: ctx.flatId, limit: 3 })
+      : Promise.resolve([]),
+    ctx?.flatId
+      ? listMaintenanceRequests(supabase, { flatId: ctx.flatId, limit: 3 })
+      : Promise.resolve([]),
+    ctx?.tenancyId
+      ? getTenantMonthDue(duesClient, ctx.tenancyId)
+      : Promise.resolve(null),
+  ]);
+  const receipts = receiptsAll.filter(
     (row) => row.tenantProfileId === user.id
   );
-  const electricity = ctx?.flatId
-    ? await listElectricityReadings(supabase, { flatId: ctx.flatId, limit: 3 })
-    : [];
-  const maintenance = ctx?.flatId
-    ? await listMaintenanceRequests(supabase, { flatId: ctx.flatId, limit: 3 })
-    : [];
-  const monthDue = ctx?.tenancyId
-    ? await getTenantMonthDue(duesClient, ctx.tenancyId)
-    : null;
 
   const latestReceipt = receipts[0] ?? null;
   const rentUnpaid =

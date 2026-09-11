@@ -86,7 +86,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
 
   const whatsapp = getWhatsAppBusinessConfig();
 
-  const [monthSummary, depositsCollected, history, pendingSubmissions, unpaidReminders, ownerDues, paymentAccountsResult] =
+  const [monthSummary, depositsCollected, history, pendingSubmissions, ownerDues, paymentAccountsResult] =
     await Promise.all([
       getMonthlyDuesSummary(supabase, month),
       getMonthlyDepositsCollected(
@@ -101,10 +101,14 @@ export default async function PaymentsPage({ searchParams }: Props) {
         limit: 80,
       }),
       listPaymentSubmissions(supabase, { status: "pending", limit: 40 }),
-      listUnpaidRentReminders(supabase, month),
       listOwnerDueReminders(supabase),
       listPaymentAccounts(supabase),
     ]);
+  const unpaidReminders = await listUnpaidRentReminders(
+    supabase,
+    monthSummary.billingMonthKey,
+    monthSummary
+  );
 
   const paymentAccounts = paymentAccountsResult.accounts;
 
