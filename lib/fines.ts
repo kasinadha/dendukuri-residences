@@ -47,12 +47,17 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
 
 export async function loadFinesDueByTenancy(
   supabase: SupabaseClient,
-  billingMonthKey: string
+  billingMonthKey: string,
+  options?: { tenancyId?: string }
 ): Promise<Map<string, number>> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("tenant_fines")
     .select("tenancy_id, amount")
     .eq("billing_month", billingMonthKey);
+  if (options?.tenancyId) {
+    query = query.eq("tenancy_id", options.tenancyId);
+  }
+  const { data, error } = await query;
 
   if (error || !data) return new Map();
 

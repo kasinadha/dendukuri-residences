@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -20,7 +21,7 @@ export type SessionContext = {
  * Validates the Auth session with the Supabase Auth server (getUser),
  * then loads the app profile. Prefer this over getClaims() for route protection.
  */
-export async function getSessionProfile() {
+export const getSessionProfile = cache(async function getSessionProfile() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -42,7 +43,7 @@ export async function getSessionProfile() {
     user,
     profile: profile as AppProfile | null,
   };
-}
+});
 
 export async function requireAdmin(): Promise<SessionContext> {
   const session = await getSessionProfile();

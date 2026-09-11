@@ -33,12 +33,16 @@ function currentMonthLabel() {
 export default async function AdminDashboard() {
   const { supabase } = await requireAdmin();
   const whatsapp = getWhatsAppBusinessConfig();
-  const [flats, rentMonth, unpaidReminders, ownerDues] = await Promise.all([
+  const [flats, rentMonth, ownerDues] = await Promise.all([
     listFlatsForAdmin(supabase),
     getMonthlyDuesSummary(supabase),
-    listUnpaidRentReminders(supabase),
     listOwnerDueReminders(supabase),
   ]);
+  const unpaidReminders = await listUnpaidRentReminders(
+    supabase,
+    rentMonth.billingMonthKey,
+    rentMonth
+  );
 
   const summary = summarizeFlats(flats);
   const monthLabel = currentMonthLabel();

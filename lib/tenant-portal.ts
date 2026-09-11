@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
 import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
@@ -64,7 +65,7 @@ async function resolveFlatNumber(
 /**
  * Resolves the signed-in auth user → tenants.profile_id → active tenancy/flat.
  */
-export async function getTenantPortalContext(
+export const getTenantPortalContext = cache(async function getTenantPortalContext(
   supabase: SupabaseClient,
   profileId: string
 ): Promise<TenantPortalContext | null> {
@@ -115,4 +116,4 @@ export async function getTenantPortalContext(
       rentRaw != null && Number.isFinite(rentRaw) ? rentRaw : null,
     tenancyStatus: active?.status ?? null,
   };
-}
+});

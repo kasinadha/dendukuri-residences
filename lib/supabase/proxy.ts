@@ -1,7 +1,19 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+function skipSessionRefresh(pathname: string) {
+  return (
+    pathname === "/" ||
+    pathname === "/enquire" ||
+    pathname.startsWith("/enquire/")
+  );
+}
+
 export async function updateSession(request: NextRequest) {
+  if (skipSessionRefresh(request.nextUrl.pathname)) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });

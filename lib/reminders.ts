@@ -1,12 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { listMaintenanceRequests } from "@/lib/maintenance";
+import { formatExpenseLocation } from "@/lib/expense-location";
+import { currentBillingMonthKey } from "@/lib/fines";
 import {
   formatMonthlyDuesBreakdown,
   getMonthlyDuesSummary,
   getTenancyMonthlyDueRow,
   type MonthlyDuesLedgerRow,
+  type MonthlyDuesSummary,
 } from "@/lib/monthly-dues";
-import { formatExpenseLocation } from "@/lib/expense-location";
 import { listWaterTankers } from "@/lib/ops";
 import type { PaymentStatus } from "@/lib/payment-status";
 import {
@@ -57,13 +59,15 @@ function reminderMessage(row: MonthlyDuesLedgerRow): string {
  */
 export async function listUnpaidRentReminders(
   supabase: SupabaseClient,
-  billingMonthKey?: string
+  billingMonthKey?: string,
+  precomputed?: MonthlyDuesSummary
 ): Promise<{
   billingMonthKey: string;
   billingMonthLabel: string;
   rows: UnpaidReminderRow[];
 }> {
-  const summary = await getMonthlyDuesSummary(supabase, billingMonthKey);
+  const summary =
+    precomputed ?? (await getMonthlyDuesSummary(supabase, billingMonthKey));
   const unpaid = summary.rows.filter(
     (row) => row.status !== "paid" && row.status !== "waived"
   );
@@ -358,10 +362,6 @@ export async function getTenantMonthDue(
   billingMonthKey?: string
 ): Promise<MonthlyDuesLedgerRow | null> {
   if (!tenancyId) return null;
-  const monthKey = billingMonthKey?.trim();
-  const summary = await getMonthlyDuesSummary(supabase, monthKey);
-  const found = summary.rows.find((row) => row.tenancyId === tenancyId);
-  if (found) return found;
-  if (!monthKey) return null;
+  const monthKey = billingMonthKey?.trim() || currentBillingMonthKey();
   return getTenancyMonthlyDueRow(supabase, tenancyId, monthKey);
 }

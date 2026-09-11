@@ -1,5 +1,3 @@
-"use client";
-
 import Image from "next/image";
 import {
   Building2,
@@ -13,7 +11,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { WHATSAPP_BUSINESS_PHONE_E164 } from "@/lib/whatsapp";
+import { WHATSAPP_BUSINESS_PHONE_E164 } from "@/lib/whatsapp-phone";
 
 const gallery = [
   { src: "/images/Building.jpg", label: "Building" },
@@ -67,6 +65,7 @@ export default function HomePage() {
           alt="Dendukuri's Residences"
           fill
           priority
+          sizes="100vw"
           className="object-cover opacity-55"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/75 to-slate-950/20" />
@@ -128,7 +127,13 @@ export default function HomePage() {
       <section id="about" className="py-24">
         <div className="mx-auto grid max-w-7xl gap-14 px-5 lg:grid-cols-2 lg:items-center lg:px-8">
           <div className="relative aspect-[4/3] overflow-hidden rounded-[2rem]">
-            <Image src="/images/terrace.jpg" alt="Dendukuri's Residences terrace" fill className="object-cover" />
+            <Image
+              src="/images/terrace.jpg"
+              alt="Dendukuri's Residences terrace"
+              fill
+              sizes="(max-width: 1024px) 100vw, 50vw"
+              className="object-cover"
+            />
           </div>
 
           <div>
@@ -166,7 +171,13 @@ export default function HomePage() {
           <div className="mt-14 grid gap-8 lg:grid-cols-2">
             <article className="overflow-hidden rounded-[2rem] bg-white shadow-sm">
               <div className="relative aspect-[16/10]">
-                <Image src="/images/1BHK-livingroom-staged.jpg" alt="1BHK flat" fill className="object-cover" />
+                <Image
+                  src="/images/1BHK-livingroom-staged.jpg"
+                  alt="1BHK flat"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  className="object-cover"
+                />
               </div>
               <div className="p-8">
                 <p className="text-sm font-semibold text-emerald-600">SMART & COMFORTABLE</p>
@@ -203,7 +214,13 @@ export default function HomePage() {
 
             <article className="overflow-hidden rounded-[2rem] bg-white shadow-sm">
               <div className="relative aspect-[16/10]">
-                <Image src="/images/2BHK-living-view-staged.jpg" alt="2BHK flat" fill className="object-cover" />
+                <Image
+                  src="/images/2BHK-living-view-staged.jpg"
+                  alt="2BHK flat"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  className="object-cover"
+                />
               </div>
               <div className="p-8">
                 <p className="text-sm font-semibold text-emerald-600">SPACIOUS FAMILY HOME</p>
@@ -273,7 +290,17 @@ export default function HomePage() {
                 key={image.src}
                 className={`group relative overflow-hidden rounded-2xl ${index === 0 ? "sm:col-span-2 lg:col-span-2" : ""} aspect-[4/3]`}
               >
-                <Image src={image.src} alt={image.label} fill className="object-cover transition duration-500 group-hover:scale-105" />
+                <Image
+                  src={image.src}
+                  alt={image.label}
+                  fill
+                  sizes={
+                    index === 0
+                      ? "(max-width: 1024px) 100vw, 66vw"
+                      : "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                  }
+                  className="object-cover transition duration-500 group-hover:scale-105"
+                />
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-5 pt-16">
                   <p className="font-semibold">{image.label}</p>
                 </div>

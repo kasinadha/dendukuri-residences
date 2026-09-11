@@ -157,9 +157,10 @@ function readingBillingMonth(
 /** Load per-flat electricity due for a billing month (tenant-safe via readings RLS). */
 async function loadElectricityDueByFlatId(
   supabase: SupabaseClient,
-  billingMonthKey: string
+  billingMonthKey: string,
+  options?: { flatId?: string }
 ): Promise<Map<string, number>> {
-  const { data: readings, error: readingsError } = await supabase
+  let readingsQuery = supabase
     .from("electricity_readings")
     .select(
       `
@@ -169,6 +170,10 @@ async function loadElectricityDueByFlatId(
       electricity_billing_runs ( billing_month )
     `
     );
+  if (options?.flatId) {
+    readingsQuery = readingsQuery.eq("flat_id", options.flatId);
+  }
+  const { data: readings, error: readingsError } = await readingsQuery;
 
   if (!readingsError && readings) {
     const byFlat = new Map<string, number>();
@@ -191,10 +196,14 @@ async function loadElectricityDueByFlatId(
   if (runsError || !runs?.length) return new Map();
 
   const runIds = runs.map((row) => row.id);
-  const { data: linkedReadings, error: linkedError } = await supabase
+  let linkedQuery = supabase
     .from("electricity_readings")
     .select("flat_id, bill_amount")
     .in("billing_run_id", runIds);
+  if (options?.flatId) {
+    linkedQuery = linkedQuery.eq("flat_id", options.flatId);
+  }
+  const { data: linkedReadings, error: linkedError } = await linkedQuery;
 
   if (linkedError || !linkedReadings) return new Map();
 
@@ -571,12 +580,14 @@ export async function getTenancyMonthlyDueRow(
   if (!tenancyIncludedInMonthlyLedger(tenancyDates, monthKey)) return null;
 
   const nowKey = currentMonthKey();
-  const [electricityByFlatId, finesByTenancy] = await Promise.all([
-    loadElectricityDueByFlatId(supabase, monthKey),
-    loadFinesDueByTenancy(supabase, monthKey),
-  ]);
   const flat = unwrapOne(row.flats);
   const tenant = unwrapOne(row.tenants);
+  const [electricityByFlatId, finesByTenancy] = await Promise.all([
+    loadElectricityDueByFlatId(supabase, monthKey, {
+      flatId: flat?.id ? String(flat.id) : undefined,
+    }),
+    loadFinesDueByTenancy(supabase, monthKey, { tenancyId }),
+  ]);
 
   const { data: paymentRows } = await supabase
     .from("payments")
