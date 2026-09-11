@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { todayIsoDate } from "@/lib/dates";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
 import { PROPERTY_NAME } from "@/lib/property";
+import { tenantPhoneWriteFields } from "@/lib/tenants";
 
 export const D201_FLAT_NUMBER = "D201";
 export const D201_MONTHLY_RENT = 10000;
@@ -161,7 +162,7 @@ export async function createTenancyLink(
     const tenantPayload = {
       full_name: fullName,
       email: input.tenantEmail?.trim() || null,
-      phone: input.tenantPhone?.trim() || null,
+      ...tenantPhoneWriteFields(input.tenantPhone),
       notes,
     };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { sendReceiptWhatsAppAction } from "@/app/admin/receipts/actions";
 import { formatReceiptPdfShareMessage } from "@/lib/receipts";
 import type { ReceiptViewModel } from "@/lib/receipts";
 import {
@@ -8,22 +9,39 @@ import {
   downloadPdfBlob,
 } from "@/lib/receipt-share";
 import { receiptPdfFileName } from "@/lib/receipt-pdf";
-import { toTenantWhatsAppUrl } from "@/lib/whatsapp";
+import { toTenantWhatsAppUrl } from "@/lib/whatsapp-phone";
 
 type Props = {
   receipt: ReceiptViewModel;
   viewer: "admin" | "tenant";
+  whatsappApiEnabled?: boolean;
 };
 
-export default function ShareReceiptWhatsAppButton({ receipt, viewer }: Props) {
+export default function ShareReceiptWhatsAppButton({
+  receipt,
+  viewer,
+  whatsappApiEnabled = false,
+}: Props) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
 
   async function handleShare() {
     setPending(true);
     setError("");
+    setSent(false);
 
     try {
+      if (viewer === "admin" && whatsappApiEnabled) {
+        const result = await sendReceiptWhatsAppAction(receipt.receiptId);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSent(true);
+        return;
+      }
+
       const file = await buildReceiptPdfFile(receipt);
       const message = formatReceiptPdfShareMessage(receipt);
       const shareData: ShareData = {
@@ -67,12 +85,20 @@ export default function ShareReceiptWhatsAppButton({ receipt, viewer }: Props) {
         className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1ebe5d] disabled:opacity-60"
       >
         <WhatsAppIcon />
-        {pending ? "Preparing PDF…" : "Share PDF on WhatsApp"}
+        {pending
+          ? whatsappApiEnabled && viewer === "admin"
+            ? "Sending PDF…"
+            : "Preparing PDF…"
+          : sent
+            ? "Sent on WhatsApp"
+            : "Share PDF on WhatsApp"}
       </button>
       <span className="max-w-xs text-right text-xs text-slate-500">
-        {viewer === "admin" && !receipt.tenantPhone
-          ? "PDF attaches on phone; on desktop it downloads first, then WhatsApp opens."
-          : "Shares the receipt as a PDF attachment on supported devices."}
+        {viewer === "admin" && whatsappApiEnabled
+          ? "Sends the receipt PDF from the business WhatsApp number."
+          : viewer === "admin" && !receipt.tenantPhone
+            ? "PDF attaches on phone; on desktop it downloads first, then WhatsApp opens."
+            : "Shares the receipt as a PDF attachment on supported devices."}
       </span>
       {error ? (
         <span className="max-w-xs text-right text-xs text-red-600">{error}</span>

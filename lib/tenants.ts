@@ -8,6 +8,14 @@ import {
 
 export type { TenantMonthlyCharges };
 
+/** Keep tenants.phone and tenants.phone_number in lockstep for WhatsApp. */
+export function tenantPhoneWriteFields(
+  phone: string | null | undefined
+): { phone: string | null; phone_number: string | null } {
+  const value = phone?.trim() || null;
+  return { phone: value, phone_number: value };
+}
+
 export type TenantListItem = {
   id: string;
   fullName: string;
@@ -100,7 +108,7 @@ export async function updateTenantProfile(
     .from("tenants")
     .update({
       full_name: input.fullName.trim(),
-      phone: input.phone?.trim() || null,
+      ...tenantPhoneWriteFields(input.phone),
       email: input.email?.trim() || null,
     })
     .eq("id", input.tenantId);

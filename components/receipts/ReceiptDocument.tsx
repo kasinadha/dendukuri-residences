@@ -4,6 +4,7 @@ import ShareReceiptWhatsAppButton from "@/components/receipts/ShareReceiptWhatsA
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
 import type { ReceiptViewModel } from "@/lib/receipts";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
+import { getWhatsAppBusinessConfig } from "@/lib/whatsapp";
 
 type Props = {
   receipt: ReceiptViewModel;
@@ -26,6 +27,8 @@ function methodLabel(value: string): string {
 export default function ReceiptDocument({ receipt, viewer }: Props) {
   const backHref =
     viewer === "admin" ? "/admin/payments" : "/tenant/receipts";
+  const whatsappApiEnabled =
+    viewer === "admin" && getWhatsAppBusinessConfig().apiEnabled;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -37,7 +40,11 @@ export default function ReceiptDocument({ receipt, viewer }: Props) {
           ← Back
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <ShareReceiptWhatsAppButton receipt={receipt} viewer={viewer} />
+          <ShareReceiptWhatsAppButton
+            receipt={receipt}
+            viewer={viewer}
+            whatsappApiEnabled={whatsappApiEnabled}
+          />
           <PrintReceiptButton receipt={receipt} />
         </div>
       </div>

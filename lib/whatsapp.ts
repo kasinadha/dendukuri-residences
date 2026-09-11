@@ -1,13 +1,35 @@
-/** Dedicated business line for tenant reminders (+91 8867887061). */
-export const WHATSAPP_BUSINESS_PHONE_E164 = "918867887061";
+/**
+ * Server-only WhatsApp send path (Twilio REST, else Meta Cloud API).
+ * Client UI must import phone helpers from `@/lib/whatsapp-phone`.
+ */
+import {
+  getTwilioContentSid,
+  isTwilioWhatsAppConfigured,
+  sendTwilioWhatsAppMessage,
+} from "@/lib/twilio";
+import {
+  WHATSAPP_BUSINESS_PHONE_E164,
+  digitsOnly,
+  formatWhatsAppBusinessPhoneDisplay,
+  normalizeTenantWhatsAppDigits,
+} from "@/lib/whatsapp-phone";
+
+export {
+  WHATSAPP_BUSINESS_PHONE_E164,
+  digitsOnly,
+  formatWhatsAppBusinessPhoneDisplay,
+  normalizeTenantWhatsAppDigits,
+  toTenantWhatsAppUrl,
+} from "@/lib/whatsapp-phone";
 
 export type WhatsAppBusinessConfig = {
   /** E.164 digits only, e.g. 918867887061 */
   businessPhone: string;
   /** Human-readable label for admin UI, e.g. +91 88678 87061 */
   businessPhoneDisplay: string;
-  /** Meta WhatsApp Cloud API configured */
+  /** Twilio WhatsApp (preferred) or Meta Cloud API configured */
   apiEnabled: boolean;
+  provider: "twilio" | "meta" | "none";
 };
 
 export type WhatsAppTemplateSend = {
@@ -25,31 +47,6 @@ type GraphError = {
   error_data?: { details?: string };
 };
 
-export function digitsOnly(value: string | null | undefined): string {
-  return (value ?? "").replace(/\D/g, "");
-}
-
-export function normalizeTenantWhatsAppDigits(
-  phone: string | null | undefined
-): string | null {
-  let digits = digitsOnly(phone);
-  if (digits.length === 10) digits = `91${digits}`;
-  if (digits.length < 11) return null;
-  return digits;
-}
-
-export function formatWhatsAppBusinessPhoneDisplay(
-  phone: string | null | undefined
-): string {
-  const digits =
-    normalizeTenantWhatsAppDigits(phone) ?? WHATSAPP_BUSINESS_PHONE_E164;
-  if (digits.startsWith("91") && digits.length === 12) {
-    const local = digits.slice(2);
-    return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
-  }
-  return `+${digits}`;
-}
-
 function looksLikePhoneNumberId(value: string): boolean {
   const digits = digitsOnly(value);
   return (
@@ -60,6 +57,10 @@ function looksLikePhoneNumberId(value: string): boolean {
 }
 
 export function getWhatsAppTemplateName(kind: "dues" | "terms"): string | null {
+  if (isTwilioWhatsAppConfigured()) {
+    const contentSid = getTwilioContentSid(kind);
+    if (contentSid) return contentSid;
+  }
   const key =
     kind === "dues"
       ? process.env.WHATSAPP_TEMPLATE_DUES
@@ -78,6 +79,8 @@ export function getWhatsAppBusinessConfig(): WhatsAppBusinessConfig {
     WHATSAPP_BUSINESS_PHONE_E164;
   const token = process.env.WHATSAPP_CLOUD_API_TOKEN?.trim();
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+  const twilio = isTwilioWhatsAppConfigured();
+  const meta = Boolean(token && phoneNumberId);
 
   const businessPhone =
     normalizeTenantWhatsAppDigits(raw) ?? WHATSAPP_BUSINESS_PHONE_E164;
@@ -85,18 +88,9 @@ export function getWhatsAppBusinessConfig(): WhatsAppBusinessConfig {
   return {
     businessPhone,
     businessPhoneDisplay: formatWhatsAppBusinessPhoneDisplay(businessPhone),
-    apiEnabled: Boolean(token && phoneNumberId),
+    apiEnabled: twilio || meta,
+    provider: twilio ? "twilio" : meta ? "meta" : "none",
   };
-}
-
-/** Opens WhatsApp chat to tenant with a pre-filled reminder (sender = logged-in WA account). */
-export function toTenantWhatsAppUrl(
-  tenantPhone: string | null | undefined,
-  message: string
-): string | null {
-  const digits = normalizeTenantWhatsAppDigits(tenantPhone);
-  if (!digits) return null;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
 function explainGraphError(status: number, error: GraphError | undefined): string {
@@ -157,11 +151,29 @@ function templatePayload(
   };
 }
 
-async function postWhatsAppMessage(
+const META_MAX_ATTEMPTS = 3;
+const META_RETRY_BASE_MS = 400;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+export function whatsappApiNotConfiguredError(): string {
+  return "WhatsApp API is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_FROM — or WHATSAPP_CLOUD_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID.";
+}
+
+async function postWhatsAppMessageOnce(
   token: string,
   phoneNumberId: string,
   body: Record<string, unknown>
-): Promise<{ ok: true; messageId: string } | { ok: false; error: string; code?: number }> {
+): Promise<
+  | { ok: true; messageId: string }
+  | { ok: false; error: string; code?: number; retryable?: boolean }
+> {
   const response = await fetch(
     `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
     {
@@ -183,6 +195,7 @@ async function postWhatsAppMessage(
       ok: false,
       error: `WhatsApp send failed: ${explainGraphError(response.status, payload?.error)}`,
       code: payload?.error?.code,
+      retryable: isRetryableHttpStatus(response.status),
     };
   }
 
@@ -197,18 +210,73 @@ async function postWhatsAppMessage(
   return { ok: true, messageId };
 }
 
+async function postWhatsAppMessage(
+  token: string,
+  phoneNumberId: string,
+  body: Record<string, unknown>
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string; code?: number }> {
+  let last: { ok: false; error: string; code?: number } = {
+    ok: false,
+    error: "WhatsApp send did not run.",
+  };
+
+  for (let attempt = 0; attempt < META_MAX_ATTEMPTS; attempt += 1) {
+    const result = await postWhatsAppMessageOnce(token, phoneNumberId, body);
+    if (result.ok) return result;
+    last = result;
+    if (!result.retryable || attempt === META_MAX_ATTEMPTS - 1) return result;
+    await sleep(META_RETRY_BASE_MS * 2 ** attempt);
+  }
+
+  return last;
+}
+
+function documentPayload(
+  to: string,
+  mediaUrl: string,
+  caption: string,
+  fileName?: string | null
+): Record<string, unknown> {
+  return {
+    messaging_product: "whatsapp",
+    to,
+    type: "document",
+    document: {
+      link: mediaUrl,
+      filename: fileName?.trim() || "receipt.pdf",
+      ...(caption.trim() ? { caption: caption.slice(0, 1024) } : {}),
+    },
+  };
+}
+
 export async function sendWhatsAppBusinessMessage(input: {
   toPhone: string;
   body: string;
   template?: WhatsAppTemplateSend | null;
+  mediaUrl?: string | null;
+  mediaFileName?: string | null;
 }): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  const to = normalizeTenantWhatsAppDigits(input.toPhone);
+  if (!to) {
+    return { ok: false, error: "Tenant mobile number is missing or invalid." };
+  }
+
+  if (isTwilioWhatsAppConfigured()) {
+    return sendTwilioWhatsAppMessage({
+      toE164Digits: to,
+      body: input.body,
+      contentSid: input.template?.name,
+      contentVariables: input.template?.bodyParams,
+      mediaUrl: input.mediaUrl,
+    });
+  }
+
   const token = process.env.WHATSAPP_CLOUD_API_TOKEN?.trim();
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
   if (!token || !phoneNumberId) {
     return {
       ok: false,
-      error:
-        "WhatsApp API is not configured. Set WHATSAPP_CLOUD_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID.",
+      error: whatsappApiNotConfiguredError(),
     };
   }
 
@@ -220,9 +288,12 @@ export async function sendWhatsAppBusinessMessage(input: {
     };
   }
 
-  const to = normalizeTenantWhatsAppDigits(input.toPhone);
-  if (!to) {
-    return { ok: false, error: "Tenant mobile number is missing or invalid." };
+  if (input.mediaUrl?.trim()) {
+    return postWhatsAppMessage(
+      token,
+      phoneNumberId,
+      documentPayload(to, input.mediaUrl.trim(), input.body, input.mediaFileName)
+    );
   }
 
   if (input.template?.name) {
