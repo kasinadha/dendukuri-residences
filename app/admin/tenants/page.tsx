@@ -5,12 +5,14 @@ import SyncMoveInDatesButton from "@/components/admin/SyncMoveInDatesButton";
 import TenantDetailsEditor from "@/components/admin/TenantDetailsEditor";
 import TenantLoginActions from "@/components/admin/TenantLoginActions";
 import TenantOccupancyActions from "@/components/admin/TenantOccupancyActions";
+import NameChangeRequestsPanel from "@/components/admin/NameChangeRequestsPanel";
 import { requireAdmin } from "@/lib/auth";
 import { listFlatsForAdmin } from "@/lib/flats";
 import { formatDisplayDate, formatInr } from "@/lib/receipts";
 import { listTenantsForAdmin } from "@/lib/tenants";
 import { buildTenantDuplicateMergeMap } from "@/lib/tenant-duplicates";
 import { listUnpaidRentReminders } from "@/lib/reminders";
+import { listPendingNameChangeRequests } from "@/lib/tenant-change-requests";
 
 export default async function TenantsPage({
   searchParams,
@@ -22,10 +24,11 @@ export default async function TenantsPage({
   const showFormer = params.show === "former" || params.show === "all";
   const showArchived = params.show === "archived";
 
-  const [tenants, flats, unpaidDues] = await Promise.all([
+  const [tenants, flats, unpaidDues, nameChanges] = await Promise.all([
     listTenantsForAdmin(supabase),
     listFlatsForAdmin(supabase),
     listUnpaidRentReminders(supabase),
+    listPendingNameChangeRequests(supabase),
   ]);
 
   const nonArchivedTenants = tenants.filter((t) => !t.isArchived);
@@ -150,6 +153,8 @@ export default async function TenantsPage({
           </p>
         </div>
       ) : null}
+
+      <NameChangeRequestsPanel rows={nameChanges} />
 
       {unpaidDues.rows.length > 0 ? (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
