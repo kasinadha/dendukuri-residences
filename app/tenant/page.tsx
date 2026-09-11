@@ -8,17 +8,12 @@ import {
   IndianRupee,
   ScrollText,
 } from "lucide-react";
-import TenantNameChangeForm from "@/components/tenant/TenantNameChangeForm";
 import { requireTenant } from "@/lib/auth";
 import { listElectricityReadings } from "@/lib/electricity";
 import { listMaintenanceRequests } from "@/lib/maintenance";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatInr, listReceiptViews } from "@/lib/receipts";
 import { getTenantMonthDue } from "@/lib/reminders";
-import {
-  getPendingNameChangeForTenant,
-  listTenantChangeRequestsForTenant,
-} from "@/lib/tenant-change-requests";
 import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 import { getTenantPortalContext } from "@/lib/tenant-portal";
 
@@ -38,13 +33,6 @@ export default async function TenantHomePage() {
   const monthDue = ctx?.tenancyId
     ? await getTenantMonthDue(duesClient, ctx.tenancyId)
     : null;
-  const pendingName = ctx?.tenantId
-    ? await getPendingNameChangeForTenant(supabase, ctx.tenantId)
-    : null;
-  const nameHistory = ctx?.tenantId
-    ? await listTenantChangeRequestsForTenant(supabase, ctx.tenantId)
-    : [];
-  const latestNameRequest = nameHistory[0] ?? null;
 
   const latestReceipt = receipts[0] ?? null;
   const rentUnpaid =
@@ -159,7 +147,7 @@ export default async function TenantHomePage() {
             href: "/tenant/receipts",
             icon: Receipt,
             title: "Rent receipts",
-            detail: "View, print, and download HRA PDFs",
+            detail: "View, print, and download PDFs",
           },
           {
             href: "/tenant/electricity",
@@ -208,16 +196,6 @@ export default async function TenantHomePage() {
           </Link>
         ))}
       </div>
-
-      {ctx ? (
-        <div className="mt-8">
-          <TenantNameChangeForm
-            currentName={profile.full_name ?? ctx.fullName}
-            pending={pendingName}
-            latest={latestNameRequest}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }

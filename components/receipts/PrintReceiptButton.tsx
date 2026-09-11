@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { receiptPdfFileName } from "@/lib/receipt-pdf";
-import { hraRentPaid, type ReceiptViewModel } from "@/lib/receipts";
+import type { ReceiptViewModel } from "@/lib/receipts";
 import { downloadPdfBlob, fetchReceiptPdfBlob } from "@/lib/receipt-share";
 
 export default function PrintReceiptButton({
@@ -10,16 +10,15 @@ export default function PrintReceiptButton({
 }: {
   receipt: ReceiptViewModel;
 }) {
-  const [pending, setPending] = useState<"full" | "hra" | null>(null);
-  const hraAmount = hraRentPaid(receipt);
+  const [pending, setPending] = useState(false);
 
-  async function handleDownloadPdf(kind: "full" | "hra") {
-    setPending(kind);
+  async function handleDownloadPdf() {
+    setPending(true);
     try {
-      const blob = await fetchReceiptPdfBlob(receipt.receiptId, kind);
-      downloadPdfBlob(blob, receiptPdfFileName(receipt, kind));
+      const blob = await fetchReceiptPdfBlob(receipt.receiptId);
+      downloadPdfBlob(blob, receiptPdfFileName(receipt));
     } finally {
-      setPending(null);
+      setPending(false);
     }
   }
 
@@ -27,22 +26,12 @@ export default function PrintReceiptButton({
     <div className="flex flex-wrap gap-2">
       <button
         type="button"
-        onClick={() => void handleDownloadPdf("full")}
-        disabled={pending != null}
+        onClick={() => void handleDownloadPdf()}
+        disabled={pending}
         className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
       >
-        {pending === "full" ? "Preparing PDF…" : "Download PDF"}
+        {pending ? "Preparing PDF…" : "Download PDF"}
       </button>
-      {hraAmount > 0 ? (
-        <button
-          type="button"
-          onClick={() => void handleDownloadPdf("hra")}
-          disabled={pending != null}
-          className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
-        >
-          {pending === "hra" ? "Preparing HRA…" : "Download HRA PDF"}
-        </button>
-      ) : null}
       <button
         type="button"
         onClick={() => window.print()}

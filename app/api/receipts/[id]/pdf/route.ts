@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSessionProfile } from "@/lib/auth";
 import { renderReceiptPdfBuffer, receiptPdfFileName } from "@/lib/receipt-pdf";
-import { fetchReceiptViewById, hraRentPaid } from "@/lib/receipts";
+import { fetchReceiptViewById } from "@/lib/receipts";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-export async function GET(request: Request, context: RouteContext) {
+export async function GET(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const { supabase, user, profile } = await getSessionProfile();
 
@@ -28,18 +28,8 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const kind =
-    new URL(request.url).searchParams.get("kind") === "hra" ? "hra" : "full";
-
-  if (kind === "hra" && hraRentPaid(receipt) <= 0) {
-    return NextResponse.json(
-      { error: "This payment has no house-rent amount for HRA." },
-      { status: 400 }
-    );
-  }
-
-  const pdf = await renderReceiptPdfBuffer(receipt, kind);
-  const fileName = receiptPdfFileName(receipt, kind);
+  const pdf = await renderReceiptPdfBuffer(receipt);
+  const fileName = receiptPdfFileName(receipt);
 
   return new NextResponse(new Uint8Array(pdf), {
     headers: {

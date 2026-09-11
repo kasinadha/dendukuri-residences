@@ -14,7 +14,8 @@ export default function TenantMaintenanceForm() {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     startTransition(async () => {
       const result = await tenantCreateMaintenance(formData);
       if (!result.ok) {
@@ -22,7 +23,7 @@ export default function TenantMaintenanceForm() {
         return;
       }
       setSuccess("Request submitted.");
-      event.currentTarget.reset();
+      form.reset();
       router.refresh();
     });
   }

@@ -66,7 +66,8 @@ export default function AdminEnquiriesClient({
     event.preventDefault();
     if (!selected) return;
     setError("");
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     formData.set("enquiry_id", selected.id);
     startTransition(async () => {
       const result = await addEnquiryFollowupAction(formData);
@@ -74,7 +75,7 @@ export default function AdminEnquiriesClient({
         setError(result.error);
         return;
       }
-      event.currentTarget.reset();
+      form.reset();
       router.refresh();
     });
   }

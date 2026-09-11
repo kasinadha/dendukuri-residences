@@ -2,10 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isActiveTenancyStatus } from "@/lib/occupancy";
 import { PROPERTY_NAME } from "@/lib/property";
 import { formatInr } from "@/lib/receipts";
+import { remindedWithinHours } from "@/lib/reminders";
 import { buildTenantMonthlyCharges } from "@/lib/tenant-charges";
 import {
   formatWhatsAppBusinessPhoneDisplay,
   getWhatsAppBusinessConfig,
+  getWhatsAppTemplateLanguage,
+  getWhatsAppTemplateName,
+  sendWhatsAppBusinessMessage,
   toTenantWhatsAppUrl,
 } from "@/lib/whatsapp";
 
@@ -629,8 +633,130 @@ export function buildAgreementReminderMessage(row: {
   return `Hi ${row.tenantName}, please read and accept the rental terms for Flat ${row.flatNumber} in the tenant portal (rent ${formatInr(row.monthlyRent)} / month). — ${PROPERTY_NAME} (${business})`;
 }
 
-export function agreementWhatsAppUrl(row: TenancyAgreement): string | null {
-  return toTenantWhatsAppUrl(row.phone, buildAgreementReminderMessage(row));
+export async function sendAgreementWhatsAppReminder(
+  supabase: SupabaseClient,
+  input: {
+    agreementId: string;
+    tenancyId: string;
+    remindedBy?: string | null;
+    channel?: string | null;
+  }
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  const agreementId = input.agreementId.trim();
+  const tenancyId = input.tenancyId.trim();
+  if (!agreementId || !tenancyId) {
+    return { ok: false, error: "Missing agreement." };
+  }
+
+  const { data, error } = await supabase
+    .from("tenancy_agreements")
+    .select(
+      `
+      id,
+      tenancy_id,
+      flat_number,
+      tenant_name,
+      monthly_rent,
+      tenancies ( tenants ( phone ) )
+    `
+    )
+    .eq("id", agreementId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, error: error?.message ?? "Agreement not found." };
+  }
+
+  const tenancy = Array.isArray(data.tenancies) ? data.tenancies[0] : data.tenancies;
+  const tenant = Array.isArray(tenancy?.tenants)
+    ? tenancy?.tenants[0]
+    : tenancy?.tenants;
+  const phone = tenant?.phone?.trim() || null;
+  if (!phone) {
+    return { ok: false, error: "Tenant has no mobile number on file." };
+  }
+
+  const tenantName = data.tenant_name?.trim() || "Tenant";
+  const flatNumber = data.flat_number?.trim() || "—";
+  const monthlyRent = Number(data.monthly_rent) || 0;
+  const templateName = getWhatsAppTemplateName("terms");
+  const sendResult = await sendWhatsAppBusinessMessage({
+    toPhone: phone,
+    body: buildAgreementReminderMessage({
+      tenantName,
+      flatNumber,
+      monthlyRent,
+    }),
+    template: templateName
+      ? {
+          name: templateName,
+          language: getWhatsAppTemplateLanguage(),
+          bodyParams: [tenantName, flatNumber, formatInr(monthlyRent)],
+        }
+      : null,
+  });
+  if (!sendResult.ok) return sendResult;
+
+  const markResult = await markAgreementReminded(supabase, {
+    agreementId,
+    tenancyId,
+    remindedBy: input.remindedBy,
+    channel: input.channel?.trim() || "whatsapp_api",
+    notes: `wa_message_id:${sendResult.messageId}`,
+  });
+  if (!markResult.ok) return markResult;
+  return { ok: true, messageId: sendResult.messageId };
+}
+
+export async function sendAllPendingAgreementWhatsAppReminders(
+  supabase: SupabaseClient,
+  input?: {
+    remindedBy?: string | null;
+    channel?: string | null;
+    skipRemindedWithinHours?: number;
+  }
+): Promise<{
+  ok: true;
+  sent: number;
+  skipped: number;
+  failed: Array<{ tenancyId: string; tenantName: string; error: string }>;
+}> {
+  const agreements = await listTenancyAgreements(supabase);
+  const pending = agreements.filter(
+    (row) => row.adminStatus === "approved" && row.tenantStatus !== "accepted"
+  );
+  let sent = 0;
+  let skipped = 0;
+  const failed: Array<{ tenancyId: string; tenantName: string; error: string }> =
+    [];
+  const skipHours = input?.skipRemindedWithinHours ?? 0;
+
+  for (const row of pending) {
+    if (!row.phone) {
+      skipped += 1;
+      continue;
+    }
+    if (remindedWithinHours(row.lastRemindedAt, skipHours)) {
+      skipped += 1;
+      continue;
+    }
+    const result = await sendAgreementWhatsAppReminder(supabase, {
+      agreementId: row.id,
+      tenancyId: row.tenancyId,
+      remindedBy: input?.remindedBy,
+      channel: input?.channel,
+    });
+    if (result.ok) sent += 1;
+    else {
+      failed.push({
+        tenancyId: row.tenancyId,
+        tenantName: row.tenantName,
+        error: result.error,
+      });
+    }
+  }
+
+  return { ok: true, sent, skipped, failed };
 }
 
 export async function markAgreementReminded(
@@ -638,7 +764,7 @@ export async function markAgreementReminded(
   input: {
     agreementId: string;
     tenancyId: string;
-    remindedBy: string;
+    remindedBy?: string | null;
     channel?: string | null;
     notes?: string | null;
   }
@@ -646,7 +772,7 @@ export async function markAgreementReminded(
   const { error } = await supabase.from("agreement_reminders").insert({
     agreement_id: input.agreementId,
     tenancy_id: input.tenancyId,
-    reminded_by: input.remindedBy,
+    reminded_by: input.remindedBy || null,
     channel: input.channel?.trim() || "manual",
     notes: input.notes?.trim() || null,
   });
