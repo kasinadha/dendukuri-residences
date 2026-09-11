@@ -5,12 +5,14 @@ import {
   formatInr,
   listReceiptViews,
 } from "@/lib/receipts";
+import { getTenantDuesSupabaseClient } from "@/lib/tenant-dues-client";
 
 export default async function TenantReceiptsPage() {
   const { supabase, user } = await requireTenant();
+  const duesClient = getTenantDuesSupabaseClient(supabase);
 
   // Prefer RLS; also filter by linked profile_id as defense in depth.
-  const receipts = (await listReceiptViews(supabase, { limit: 100 })).filter(
+  const receipts = (await listReceiptViews(duesClient, { limit: 100 })).filter(
     (row) => row.tenantProfileId === user.id
   );
 
@@ -46,12 +48,36 @@ export default async function TenantReceiptsPage() {
                     </p>
                   </div>
                   <div className="text-left sm:text-right">
-                    <p className="font-semibold text-slate-900">
-                      {formatInr(receipt.rentAmount)}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Paid {formatDisplayDate(receipt.paymentDate)}
-                    </p>
+                    {receipt.amountDue != null &&
+                    receipt.amountPaid < receipt.amountDue ? (
+                      <>
+                        <p className="font-semibold text-slate-900">
+                          Paid {formatInr(receipt.amountPaid)}
+                        </p>
+                        <p className="mt-1 text-xs text-amber-800">
+                          Due {formatInr(receipt.amountDue)} · Balance{" "}
+                          {formatInr(receipt.amountDue - receipt.amountPaid)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatDisplayDate(receipt.paymentDate)} · Partial
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-slate-900">
+                          {formatInr(receipt.amountPaid)}
+                        </p>
+                        {receipt.amountDue != null &&
+                        receipt.amountDue > receipt.amountPaid ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Due {formatInr(receipt.amountDue)}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-slate-500">
+                          Paid {formatDisplayDate(receipt.paymentDate)}
+                        </p>
+                      </>
+                    )}
                   </div>
                 </Link>
               </li>

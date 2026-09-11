@@ -4,19 +4,51 @@ import {
   buildingWingLabel,
   type BuildingWing,
 } from "@/lib/building-wing";
+import type { BuildingDepositRow } from "@/lib/deposits";
+import { loadDepositSummary } from "@/lib/deposits";
+import {
+  parseDuesBreakdownFromNotes,
+  type DuesCategoryBreakdown,
+} from "@/lib/dues-breakdown";
+import { computeCollectedCategoryBreakdownForTenancy } from "@/lib/public-pay-dues";
 import { parseBillingMonthFromNotes } from "@/lib/receipts";
+
+export type { BuildingDepositRow } from "@/lib/deposits";
+export type { DuesCategoryBreakdown } from "@/lib/dues-breakdown";
+
+const EMPTY_DUES_BREAKDOWN: DuesCategoryBreakdown = {
+  rent: 0,
+  electricity: 0,
+  other: 0,
+};
 
 export type BuildingRevenueRow = {
   wing: BuildingWing;
   label: string;
-  collected: number;
-  paymentCount: number;
+  /** Rent + monthly charges collected this period */
+  duesCollected: number;
+  /** Rent / electricity / other monthly charges collected this period */
+  duesBreakdown: DuesCategoryBreakdown;
+  /** Deposit / advance collected this period */
+  depositsCollected: number;
+  spent: number;
+  /** Dues collected minus expenses (deposits excluded) */
+  net: number;
+  duesPaymentCount: number;
+  depositPaymentCount: number;
+  expenseCount: number;
+};
+
+export type SharedBuildingExpenseSummary = {
+  spent: number;
+  expenseCount: number;
 };
 
 export type AccountRevenueRow = {
   accountId: string | null;
   accountLabel: string;
-  collected: number;
+  duesCollected: number;
+  depositsCollected: number;
   paymentCount: number;
 };
 
@@ -29,12 +61,63 @@ export type AccountExpenseRow = {
 
 export type BuildingRevenueReport = {
   billingMonthKey: string | null;
+  depositsByBuilding: BuildingDepositRow[];
+  totalDepositsAgreed: number;
+  totalDepositsPaid: number;
+  totalDepositsReturned: number;
+  totalDepositsHeld: number;
   byBuilding: BuildingRevenueRow[];
+  sharedBuildingExpenses: SharedBuildingExpenseSummary;
   byAccount: AccountRevenueRow[];
   expensesByPayer: AccountExpenseRow[];
-  totalCollected: number;
+  /** Monthly dues only (rent + maintenance) */
+  totalDuesCollected: number;
+  totalDuesBreakdown: DuesCategoryBreakdown;
+  /** Deposit/advance payments in the selected period */
+  totalDepositsCollected: number;
   totalExpenses: number;
 };
+
+const DUES_PAYMENT_TYPES = new Set(["rent", "maintenance"]);
+const DEPOSIT_PAYMENT_TYPES = new Set(["advance"]);
+
+function paymentBucket(
+  paymentType: string | null | undefined
+): "dues" | "deposit" {
+  const type = String(paymentType ?? "rent").toLowerCase();
+  if (DEPOSIT_PAYMENT_TYPES.has(type)) return "deposit";
+  if (DUES_PAYMENT_TYPES.has(type)) return "dues";
+  return "dues";
+}
+
+function matchesBillingMonth(
+  dateValue: string | null | undefined,
+  billingMonth: string | null
+): boolean {
+  if (!billingMonth) return true;
+  if (!dateValue) return false;
+  return dateValue.slice(0, 7) === billingMonth;
+}
+
+function resolveExpenseBuilding(
+  buildingWing: string | null | undefined,
+  flatNumber: string | null | undefined
+): BuildingWing | "shared" | null {
+  const wing = buildingWing?.trim().toUpperCase() ?? "";
+  if (wing === "C" || wing === "D") return wing;
+  if (wing === "SHARED") return "shared";
+  return buildingWingFromFlatNumber(flatNumber);
+}
+
+function addBuildingExpense(
+  totals: Map<BuildingWing | "shared", { spent: number; count: number }>,
+  wing: BuildingWing | "shared" | null,
+  amount: number
+) {
+  if (!wing || amount <= 0) return;
+  const prev = totals.get(wing) ?? { spent: 0, count: 0 };
+  totals.set(wing, { spent: prev.spent + amount, count: prev.count + 1 });
+}
 
 function num(value: unknown): number {
   const n = typeof value === "string" ? Number(value) : Number(value);
@@ -46,59 +129,172 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
+function fallbackDuesCategoryForPayment(
+  paymentType: string | null | undefined,
+  amount: number
+): DuesCategoryBreakdown {
+  const type = String(paymentType ?? "rent").toLowerCase();
+  if (type === "maintenance") {
+    return { rent: 0, electricity: 0, other: amount };
+  }
+  return { rent: amount, electricity: 0, other: 0 };
+}
+
+function addDuesBreakdown(
+  target: DuesCategoryBreakdown,
+  delta: DuesCategoryBreakdown
+): void {
+  target.rent += delta.rent;
+  target.electricity += delta.electricity;
+  target.other += delta.other;
+}
+
+type TenancyDuesPayment = {
+  amount: number;
+  paymentType: string | null;
+  notes: string | null;
+  paymentDate: string;
+};
+
+function incrementalDuesBreakdownFromNotes(
+  payments: TenancyDuesPayment[]
+): DuesCategoryBreakdown {
+  const totals: DuesCategoryBreakdown = { ...EMPTY_DUES_BREAKDOWN };
+  for (const payment of payments) {
+    const breakdown = parseDuesBreakdownFromNotes(payment.notes);
+    if (breakdown) {
+      const rent = breakdown.lines
+        .filter((line) => line.key === "rent")
+        .reduce((sum, line) => sum + num(line.paid), 0);
+      const electricity = breakdown.lines
+        .filter((line) => line.key === "electricity")
+        .reduce((sum, line) => sum + num(line.paid), 0);
+      const other = breakdown.lines
+        .filter(
+          (line) => line.key !== "rent" && line.key !== "electricity"
+        )
+        .reduce((sum, line) => sum + num(line.paid), 0);
+      totals.rent += rent;
+      totals.electricity += electricity;
+      totals.other += other;
+      continue;
+    }
+    addDuesBreakdown(
+      totals,
+      fallbackDuesCategoryForPayment(payment.paymentType, payment.amount)
+    );
+  }
+  return totals;
+}
+
+async function loadDepositTotalsByBuilding(
+  supabase: SupabaseClient
+): Promise<{
+  byBuilding: BuildingDepositRow[];
+  totalAgreed: number;
+  totalCollected: number;
+  totalReturned: number;
+  totalHeld: number;
+}> {
+  const summary = await loadDepositSummary(supabase);
+  return {
+    byBuilding: summary.byBuilding,
+    totalAgreed: summary.totalAgreed,
+    totalCollected: summary.totalCollected,
+    totalReturned: summary.totalReturned,
+    totalHeld: summary.totalHeld,
+  };
+}
+
 export async function getBuildingRevenueReport(
   supabase: SupabaseClient,
   options?: { billingMonth?: string }
 ): Promise<BuildingRevenueReport> {
   const billingMonth = options?.billingMonth?.trim() || null;
 
-  const [paymentsResult, accountsResult, tankersResult, maintenanceResult, otherResult] =
-    await Promise.all([
-      supabase
-        .from("payments")
-        .select(
-          `
+  const [
+    paymentsResult,
+    accountsResult,
+    tankersResult,
+    maintenanceResult,
+    otherResult,
+    depositSummary,
+  ] = await Promise.all([
+    supabase
+      .from("payments")
+      .select(
+        `
           id,
+          tenancy_id,
           amount_paid,
+          payment_type,
+          payment_date,
           notes,
           receiver_account_id,
           tenancies (
-            flats ( flat_number, payment_account_id )
+            flats ( id, flat_number, payment_account_id )
           ),
           payment_accounts ( label )
         `
-        )
-        .gt("amount_paid", 0)
-        .order("payment_date", { ascending: false })
-        .limit(500),
-      supabase
-        .from("payment_accounts")
-        .select("id,label,code")
-        .eq("is_active", true),
-      supabase
-        .from("water_tankers")
-        .select("id,amount,payment_status,payer_account_id,payment_accounts(label)")
-        .not("amount", "is", null),
-      supabase
-        .from("maintenance_requests")
-        .select("id,cost,payer_account_id,payment_accounts(label)")
-        .not("cost", "is", null),
-      supabase
-        .from("operational_expenses")
-        .select("id,amount,payer_account_id,payment_accounts(label)"),
-    ]);
+      )
+      .gt("amount_paid", 0)
+      .order("payment_date", { ascending: false })
+      .limit(500),
+    supabase
+      .from("payment_accounts")
+      .select("id,label,code")
+      .eq("is_active", true),
+    supabase
+      .from("water_tankers")
+      .select(
+        "id,amount,payment_status,payer_account_id,delivery_date,building_wing,flat_id,flats(flat_number),payment_accounts(label)"
+      )
+      .not("amount", "is", null),
+    supabase
+      .from("maintenance_requests")
+      .select(
+        "id,cost,payer_account_id,created_at,flats(flat_number),payment_accounts(label)"
+      )
+      .not("cost", "is", null),
+    supabase
+      .from("operational_expenses")
+      .select(
+        "id,amount,payer_account_id,expense_date,building_wing,flats(flat_number),payment_accounts(label)"
+      ),
+    loadDepositTotalsByBuilding(supabase),
+  ]);
 
   const accountLabelById = new Map<string, string>();
+  const depositsByBuilding = depositSummary.byBuilding;
   for (const row of accountsResult.data ?? []) {
     accountLabelById.set(row.id, row.label?.trim() || row.code || "Account");
   }
 
-  const buildingTotals = new Map<BuildingWing, { collected: number; count: number }>();
+  const buildingDuesTotals = new Map<
+    BuildingWing,
+    { collected: number; count: number }
+  >();
+  const buildingDepositTotals = new Map<
+    BuildingWing,
+    { collected: number; count: number }
+  >();
+  const buildingDuesBreakdown = new Map<BuildingWing, DuesCategoryBreakdown>();
+  const tenancyDuesPayments = new Map<
+    string,
+    { wing: BuildingWing; flatId: string; payments: TenancyDuesPayment[] }
+  >();
   const accountTotals = new Map<
     string | null,
-    { collected: number; count: number; label: string }
+    {
+      duesCollected: number;
+      depositsCollected: number;
+      count: number;
+      label: string;
+    }
   >();
-  let totalCollected = 0;
+  let totalDuesCollected = 0;
+  let totalDepositsCollected = 0;
+  const totalDuesBreakdown: DuesCategoryBreakdown = { ...EMPTY_DUES_BREAKDOWN };
 
   for (const row of paymentsResult.data ?? []) {
     const amount = num(row.amount_paid);
@@ -107,18 +303,40 @@ export async function getBuildingRevenueReport(
     const { billingMonthKey } = parseBillingMonthFromNotes(row.notes);
     if (billingMonth && billingMonthKey !== billingMonth) continue;
 
-    totalCollected += amount;
+    const bucket = paymentBucket(row.payment_type as string | null);
+    if (bucket === "deposit") totalDepositsCollected += amount;
+    else totalDuesCollected += amount;
 
     const tenancy = unwrapOne(row.tenancies);
     const flat = unwrapOne(tenancy?.flats ?? null);
     const flatNumber = flat?.flat_number ?? null;
     const wing = buildingWingFromFlatNumber(flatNumber);
+    const tenancyId = String(row.tenancy_id ?? "");
     if (wing) {
-      const prev = buildingTotals.get(wing) ?? { collected: 0, count: 0 };
-      buildingTotals.set(wing, {
+      const map =
+        bucket === "deposit" ? buildingDepositTotals : buildingDuesTotals;
+      const prev = map.get(wing) ?? { collected: 0, count: 0 };
+      map.set(wing, {
         collected: prev.collected + amount,
         count: prev.count + 1,
       });
+
+      if (bucket === "dues" && tenancyId) {
+        const flatId = String(flat?.id ?? "");
+        const group = tenancyDuesPayments.get(tenancyId) ?? {
+          wing,
+          flatId,
+          payments: [],
+        };
+        if (flatId && !group.flatId) group.flatId = flatId;
+        group.payments.push({
+          amount,
+          paymentType: (row.payment_type as string | null) ?? null,
+          notes: (row.notes as string | null) ?? null,
+          paymentDate: String(row.payment_date ?? ""),
+        });
+        tenancyDuesPayments.set(tenancyId, group);
+      }
     }
 
     const accountId = row.receiver_account_id ?? null;
@@ -128,28 +346,69 @@ export async function getBuildingRevenueReport(
       (accountId ? accountLabelById.get(accountId) : null) ||
       "Unassigned";
     const prevAccount = accountTotals.get(accountId) ?? {
-      collected: 0,
+      duesCollected: 0,
+      depositsCollected: 0,
       count: 0,
       label,
     };
     accountTotals.set(accountId, {
-      collected: prevAccount.collected + amount,
+      duesCollected:
+        prevAccount.duesCollected + (bucket === "dues" ? amount : 0),
+      depositsCollected:
+        prevAccount.depositsCollected + (bucket === "deposit" ? amount : 0),
       count: prevAccount.count + 1,
       label,
     });
+  }
+
+  for (const [tenancyId, group] of tenancyDuesPayments) {
+    const breakdown =
+      billingMonth && group.flatId
+        ? await computeCollectedCategoryBreakdownForTenancy(supabase, {
+            tenancyId,
+            flatId: group.flatId,
+            billingMonthKey: billingMonth,
+            payments: group.payments.map((payment) => ({
+              amount: payment.amount,
+              paymentDate: payment.paymentDate,
+            })),
+          })
+        : incrementalDuesBreakdownFromNotes(group.payments);
+    const wingTotals = buildingDuesBreakdown.get(group.wing) ?? {
+      ...EMPTY_DUES_BREAKDOWN,
+    };
+    addDuesBreakdown(wingTotals, breakdown);
+    buildingDuesBreakdown.set(group.wing, wingTotals);
+    addDuesBreakdown(totalDuesBreakdown, breakdown);
   }
 
   const expenseTotals = new Map<
     string | null,
     { spent: number; count: number; label: string }
   >();
+  const buildingExpenseTotals = new Map<
+    BuildingWing | "shared",
+    { spent: number; count: number }
+  >();
   let totalExpenses = 0;
 
   for (const row of tankersResult.data ?? []) {
     if ((row.payment_status ?? "").toLowerCase() === "pending") continue;
+    if (!matchesBillingMonth(row.delivery_date as string | null, billingMonth)) {
+      continue;
+    }
     const amount = num(row.amount);
     if (amount <= 0) continue;
     totalExpenses += amount;
+    const flat = unwrapOne(row.flats as { flat_number?: string | null } | null);
+    addBuildingExpense(
+      buildingExpenseTotals,
+      resolveExpenseBuilding(
+        row.building_wing as string | null,
+        flat?.flat_number ?? null
+      ),
+      amount
+    );
     const accountId = row.payer_account_id ?? null;
     const accountFromJoin = unwrapOne(row.payment_accounts);
     const label =
@@ -165,9 +424,20 @@ export async function getBuildingRevenueReport(
   }
 
   for (const row of maintenanceResult.data ?? []) {
+    if (
+      !matchesBillingMonth(row.created_at as string | null, billingMonth)
+    ) {
+      continue;
+    }
     const amount = num(row.cost);
     if (amount <= 0) continue;
     totalExpenses += amount;
+    const flat = unwrapOne(row.flats as { flat_number?: string | null } | null);
+    addBuildingExpense(
+      buildingExpenseTotals,
+      resolveExpenseBuilding(null, flat?.flat_number ?? null),
+      amount
+    );
     const accountId = row.payer_account_id ?? null;
     const accountFromJoin = unwrapOne(row.payment_accounts);
     const label =
@@ -183,9 +453,23 @@ export async function getBuildingRevenueReport(
   }
 
   for (const row of otherResult.data ?? []) {
+    if (
+      !matchesBillingMonth(row.expense_date as string | null, billingMonth)
+    ) {
+      continue;
+    }
     const amount = num(row.amount);
     if (amount <= 0) continue;
     totalExpenses += amount;
+    const flat = unwrapOne(row.flats as { flat_number?: string | null } | null);
+    addBuildingExpense(
+      buildingExpenseTotals,
+      resolveExpenseBuilding(
+        row.building_wing as string | null,
+        flat?.flat_number ?? null
+      ),
+      amount
+    );
     const accountId = row.payer_account_id ?? null;
     const accountFromJoin = unwrapOne(row.payment_accounts);
     const label =
@@ -200,14 +484,31 @@ export async function getBuildingRevenueReport(
     });
   }
 
+  const sharedTotals = buildingExpenseTotals.get("shared") ?? {
+    spent: 0,
+    count: 0,
+  };
+
   const byBuilding: BuildingRevenueRow[] = (["C", "D"] as BuildingWing[]).map(
     (wing) => {
-      const totals = buildingTotals.get(wing) ?? { collected: 0, count: 0 };
+      const dues = buildingDuesTotals.get(wing) ?? { collected: 0, count: 0 };
+      const deposits = buildingDepositTotals.get(wing) ?? {
+        collected: 0,
+        count: 0,
+      };
+      const expense = buildingExpenseTotals.get(wing) ?? { spent: 0, count: 0 };
       return {
         wing,
         label: buildingWingLabel(wing),
-        collected: totals.collected,
-        paymentCount: totals.count,
+        duesCollected: dues.collected,
+        duesBreakdown:
+          buildingDuesBreakdown.get(wing) ?? { ...EMPTY_DUES_BREAKDOWN },
+        depositsCollected: deposits.collected,
+        spent: expense.spent,
+        net: dues.collected - expense.spent,
+        duesPaymentCount: dues.count,
+        depositPaymentCount: deposits.count,
+        expenseCount: expense.count,
       };
     }
   );
@@ -216,10 +517,16 @@ export async function getBuildingRevenueReport(
     .map(([accountId, totals]) => ({
       accountId,
       accountLabel: totals.label,
-      collected: totals.collected,
+      duesCollected: totals.duesCollected,
+      depositsCollected: totals.depositsCollected,
       paymentCount: totals.count,
     }))
-    .sort((a, b) => b.collected - a.collected);
+    .sort(
+      (a, b) =>
+        b.duesCollected +
+        b.depositsCollected -
+        (a.duesCollected + a.depositsCollected)
+    );
 
   const expensesByPayer: AccountExpenseRow[] = [...expenseTotals.entries()]
     .map(([accountId, totals]) => ({
@@ -230,12 +537,48 @@ export async function getBuildingRevenueReport(
     }))
     .sort((a, b) => b.spent - a.spent);
 
+  const totalDepositsAgreed = depositSummary.totalAgreed;
+  const totalDepositsPaid = depositSummary.totalCollected;
+  const totalDepositsReturned = depositSummary.totalReturned;
+  const totalDepositsHeld = depositSummary.totalHeld;
+
   return {
     billingMonthKey: billingMonth,
+    depositsByBuilding,
+    totalDepositsAgreed,
+    totalDepositsPaid,
+    totalDepositsReturned,
+    totalDepositsHeld,
     byBuilding,
+    sharedBuildingExpenses: {
+      spent: sharedTotals.spent,
+      expenseCount: sharedTotals.count,
+    },
     byAccount,
     expensesByPayer,
-    totalCollected,
+    totalDuesCollected,
+    totalDuesBreakdown,
+    totalDepositsCollected,
     totalExpenses,
   };
+}
+
+/** Sum deposit/advance payments received in a billing month. */
+export async function getMonthlyDepositsCollected(
+  supabase: SupabaseClient,
+  billingMonthKey: string
+): Promise<number> {
+  const { data } = await supabase
+    .from("payments")
+    .select("amount_paid, notes, payment_type")
+    .eq("payment_type", "advance")
+    .gt("amount_paid", 0);
+
+  let total = 0;
+  for (const row of data ?? []) {
+    const { billingMonthKey: key } = parseBillingMonthFromNotes(row.notes);
+    if (key !== billingMonthKey) continue;
+    total += num(row.amount_paid);
+  }
+  return total;
 }

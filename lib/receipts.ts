@@ -33,6 +33,7 @@ export type ReceiptViewModel = {
   receiptNumber: string;
   propertyName: string;
   tenantName: string;
+  tenantPhone: string | null;
   tenantProfileId: string | null;
   flatNumber: string;
   billingMonth: string;
@@ -109,6 +110,98 @@ export function formatDisplayDate(isoDate: string): string {
     year: "numeric",
     timeZone: "Asia/Kolkata",
   }).format(date);
+}
+
+export function formatReceiptShareMessage(
+  receipt: Pick<
+    ReceiptViewModel,
+    | "tenantName"
+    | "propertyName"
+    | "flatNumber"
+    | "billingMonth"
+    | "receiptNumber"
+    | "amountPaid"
+    | "paymentDate"
+    | "transactionReference"
+    | "paymentMethod"
+    | "duesBreakdown"
+  >,
+  viewUrl?: string | null
+): string {
+  const lines = [
+    `Hi ${receipt.tenantName},`,
+    "",
+    `Your rent receipt for ${receipt.billingMonth} is ready.`,
+    "",
+    `Flat: ${receipt.flatNumber}`,
+    `Receipt no: ${receipt.receiptNumber}`,
+    `Amount paid: ${formatInr(receipt.amountPaid)}`,
+    `Payment date: ${formatDisplayDate(receipt.paymentDate)}`,
+    `Method: ${formatPaymentMethodLabel(receipt.paymentMethod)}`,
+  ];
+
+  if (
+    receipt.transactionReference &&
+    receipt.transactionReference !== "—"
+  ) {
+    lines.push(`Reference: ${receipt.transactionReference}`);
+  }
+
+  if (receipt.duesBreakdown?.lines.length) {
+    lines.push("");
+    lines.push("Breakdown:");
+    for (const line of receipt.duesBreakdown.lines) {
+      if (line.paid <= 0) continue;
+      lines.push(`• ${line.label}: ${formatInr(line.paid)}`);
+    }
+  }
+
+  if (viewUrl) {
+    lines.push("");
+    lines.push(`View receipt: ${viewUrl}`);
+  }
+
+  lines.push("");
+  lines.push(`— ${receipt.propertyName}`);
+  return lines.join("\n");
+}
+
+/** Short WhatsApp caption when the full receipt is attached as a PDF. */
+export function formatReceiptPdfShareMessage(
+  receipt: Pick<
+    ReceiptViewModel,
+    | "tenantName"
+    | "propertyName"
+    | "flatNumber"
+    | "billingMonth"
+    | "receiptNumber"
+    | "amountPaid"
+  >
+): string {
+  return [
+    `Hi ${receipt.tenantName},`,
+    "",
+    `Please find attached your rent receipt for ${receipt.billingMonth}.`,
+    "",
+    `Flat: ${receipt.flatNumber}`,
+    `Receipt no: ${receipt.receiptNumber}`,
+    `Amount paid: ${formatInr(receipt.amountPaid)}`,
+    "",
+    `— ${receipt.propertyName}`,
+  ].join("\n");
+}
+
+function formatPaymentMethodLabel(value: string): string {
+  const map: Record<string, string> = {
+    upi: "UPI",
+    bank_transfer: "Bank transfer",
+    cash: "Cash",
+    cheque: "Cheque",
+    card: "Card",
+    neft: "NEFT",
+    other: "Other",
+  };
+  return map[value] ?? value;
 }
 
 /** Current billing month key YYYY-MM in Asia/Kolkata. */
@@ -191,6 +284,7 @@ type TenantJoin = {
   id: string;
   full_name: string;
   profile_id: string | null;
+  phone: string | null;
 };
 
 type FlatJoin = {
@@ -247,6 +341,7 @@ export function toReceiptViewModel(
     receiptNumber: receipt.receipt_number,
     propertyName: PROPERTY_NAME,
     tenantName: tenant?.full_name ?? "—",
+    tenantPhone: tenant?.phone?.trim() || null,
     tenantProfileId: tenant?.profile_id ?? null,
     flatNumber: flat?.flat_number ?? "—",
     billingMonth: formatBillingMonthLabel(key),
@@ -269,15 +364,15 @@ async function enrichReceiptViewModel(
   payment: PaymentJoinRow
 ): Promise<ReceiptViewModel> {
   const view = toReceiptViewModel(receipt, payment);
-  if (view.duesBreakdown) return view;
-
   const tenancy = unwrapOne(payment.tenancies);
   const flat = unwrapOne(tenancy?.flats ?? null);
+  const tenancyId = payment.tenancy_id ?? tenancy?.id ?? null;
+  const flatId = flat?.id ?? null;
 
   const computed = await resolveReceiptDuesBreakdown(supabase, {
     notes: payment.notes,
-    tenancyId: payment.tenancy_id ?? tenancy?.id ?? null,
-    flatId: flat?.id ?? null,
+    tenancyId,
+    flatId,
     billingMonthKey: view.billingMonthKey,
   });
 
@@ -314,7 +409,7 @@ export async function fetchReceiptViewById(
       tenancies (
         id,
         monthly_rent,
-        tenants ( id, full_name, profile_id ),
+        tenants ( id, full_name, profile_id, phone ),
         flats ( id, flat_number )
       )
     `
@@ -364,7 +459,7 @@ export async function listReceiptViews(
       tenancies (
         id,
         monthly_rent,
-        tenants ( id, full_name, profile_id ),
+        tenants ( id, full_name, profile_id, phone ),
         flats ( id, flat_number )
       )
     `

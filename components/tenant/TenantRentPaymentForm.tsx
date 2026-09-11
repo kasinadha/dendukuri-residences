@@ -7,7 +7,12 @@ import {
   tenantSubmitRentPayment,
 } from "@/app/tenant/actions";
 import DuesBreakdownTable from "@/components/pay/DuesBreakdownTable";
-import type { DuesBreakdown } from "@/lib/dues-breakdown";
+import {
+  applyAdditionalPaymentToBreakdown,
+  breakdownPaymentAmountDefaults,
+  toOutstandingOnlyBreakdown,
+  type DuesBreakdown,
+} from "@/lib/dues-breakdown";
 import {
   buildUpiPayLink,
   buildUpiQrImageUrl,
@@ -18,6 +23,7 @@ type Props = {
   flatNumber: string;
   monthlyRent: number | null;
   defaultBillingMonth: string;
+  initialOutstanding?: number;
   upiId: string | null;
   upiQrUrl?: string | null;
   payeeName: string;
@@ -28,6 +34,7 @@ export default function TenantRentPaymentForm({
   flatNumber,
   monthlyRent,
   defaultBillingMonth,
+  initialOutstanding,
   upiId,
   upiQrUrl,
   payeeName,
@@ -36,21 +43,33 @@ export default function TenantRentPaymentForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [amount, setAmount] = useState(
-    monthlyRent != null ? String(monthlyRent) : ""
-  );
+  const [amount, setAmount] = useState(() => {
+    if (initialOutstanding != null && initialOutstanding > 0) {
+      return String(initialOutstanding);
+    }
+    return monthlyRent != null ? String(monthlyRent) : "";
+  });
   const [billingMonth, setBillingMonth] = useState(defaultBillingMonth);
   const [breakdown, setBreakdown] = useState<DuesBreakdown | null>(null);
   const [breakdownError, setBreakdownError] = useState("");
 
   const amountNum = Number(amount);
+  const previewBreakdown = useMemo(() => {
+    if (!breakdown) return null;
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return toOutstandingOnlyBreakdown(breakdown);
+    }
+    return toOutstandingOnlyBreakdown(
+      applyAdditionalPaymentToBreakdown(breakdown, amountNum)
+    );
+  }, [breakdown, amountNum]);
   const upiLink = useMemo(() => {
     if (!upiId || !Number.isFinite(amountNum) || amountNum <= 0) return null;
     return buildUpiPayLink({
       upiId,
       payeeName,
       amount: amountNum,
-      note: `Rent ${flatNumber} ${billingMonth}`,
+      note: `Dues ${flatNumber} ${billingMonth}`,
     });
   }, [upiId, payeeName, amountNum, flatNumber, billingMonth]);
 
@@ -70,9 +89,8 @@ export default function TenantRentPaymentForm({
       }
       setBreakdownError("");
       setBreakdown(result.breakdown);
-      setAmount(
-        String(result.breakdown.totalOutstanding || result.breakdown.totalDue)
-      );
+      const defaults = breakdownPaymentAmountDefaults(result.breakdown);
+      setAmount(defaults.amountPaid);
     });
     return () => {
       cancelled = true;
@@ -85,8 +103,8 @@ export default function TenantRentPaymentForm({
     setSuccess("");
     const formData = new FormData(event.currentTarget);
     formData.set("tenancy_id", tenancyId);
-    if (breakdown) {
-      formData.set("dues_breakdown_json", JSON.stringify(breakdown));
+    if (previewBreakdown) {
+      formData.set("dues_breakdown_json", JSON.stringify(previewBreakdown));
     }
     startTransition(async () => {
       try {
@@ -126,7 +144,8 @@ export default function TenantRentPaymentForm({
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h3 className="text-lg font-bold text-slate-900">Pay via UPI</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Pay the rent amount, then submit your UTR below for confirmation.
+          Pay rent, maintenance, washer, and electricity for the selected billing
+          month (including any arrears), then submit your UTR for confirmation.
         </p>
 
         {!upiId ? (
@@ -200,11 +219,10 @@ export default function TenantRentPaymentForm({
               Amount paid (₹)
             </span>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               name="amount"
               required
-              min="1"
-              step="1"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
@@ -261,11 +279,16 @@ export default function TenantRentPaymentForm({
           </label>
         </div>
 
-        {breakdown ? (
+        {previewBreakdown ? (
           <div className="mt-6">
             <h4 className="text-sm font-bold text-slate-900">Dues breakdown</h4>
+            {breakdown?.infoMessage ? (
+              <p className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                {breakdown.infoMessage}
+              </p>
+            ) : null}
             <div className="mt-3">
-              <DuesBreakdownTable breakdown={breakdown} />
+              <DuesBreakdownTable breakdown={previewBreakdown} />
             </div>
           </div>
         ) : breakdownError ? (

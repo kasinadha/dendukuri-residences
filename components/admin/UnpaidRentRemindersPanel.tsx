@@ -94,7 +94,9 @@ export default function UnpaidRentRemindersPanel({
           Monthly dues unpaid · {billingMonthLabel}
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          Rent plus maintenance, parking, washer, and other monthly charges.
+          Rent plus maintenance, parking, washer, other monthly charges, and
+          electricity. Move-in month has no dues; vacating tenants appear for
+          their final month only (set vacate date to close the account).
           {whatsappApiEnabled
             ? " Send directly from your business WhatsApp API, or open a draft in WhatsApp Web."
             : " Open WhatsApp with a pre-filled message, then mark reminded."}
@@ -163,22 +165,25 @@ export default function UnpaidRentRemindersPanel({
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Rent {formatInr(row.rentDue)}
-                      {row.chargesDue > 0
-                        ? ` · charges ${formatInr(row.chargesDue)}`
-                        : ""}
-                      {row.maintenanceCharge > 0
-                        ? ` (maint ${formatInr(row.maintenanceCharge)}`
-                        : ""}
-                      {row.carParkingCharge > 0
-                        ? `${row.maintenanceCharge > 0 ? "," : " ("}park ${formatInr(row.carParkingCharge)}`
-                        : ""}
-                      {row.washingMachineCharge > 0
-                        ? `, washer ${formatInr(row.washingMachineCharge)}`
-                        : ""}
-                      {row.otherMonthlyCharge > 0
-                        ? `, other ${formatInr(row.otherMonthlyCharge)}`
-                        : ""}
-                      {row.chargesDue > 0 ? ")" : ""}
+                      {row.chargesDue > 0 || row.electricityCharge > 0 ? (
+                        <>
+                          {row.maintenanceCharge > 0
+                            ? ` · maint ${formatInr(row.maintenanceCharge)}`
+                            : ""}
+                          {row.carParkingCharge > 0
+                            ? ` · park ${formatInr(row.carParkingCharge)}`
+                            : ""}
+                          {row.washingMachineCharge > 0
+                            ? ` · washer ${formatInr(row.washingMachineCharge)}`
+                            : ""}
+                          {row.otherMonthlyCharge > 0
+                            ? ` · other ${formatInr(row.otherMonthlyCharge)}`
+                            : ""}
+                          {row.electricityCharge > 0
+                            ? ` · electricity ${formatInr(row.electricityCharge)}`
+                            : ""}
+                        </>
+                      ) : null}
                     </p>
                     {remindedLabel ? (
                       <p className="mt-1 text-xs font-medium text-emerald-700">
